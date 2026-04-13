@@ -33,7 +33,7 @@ export default function Dashboard() {
   const [form, setForm] = useState({
     order_number:'', claim_number:'', product_name:'', sku:'', client_name:'',
     marketplace:'Amazon UK', category:'Reklamacja', description:'',
-    status:'open', priority:'med', is_private: false
+    status:'open', priority:'med'
   })
 
   useEffect(() => {
@@ -46,8 +46,9 @@ export default function Dashboard() {
   }, [])
 
   const loadTasks = useCallback(async () => {
-    const { data } = await supabase.from('tasks')
-      .select(`*, assignee:profiles!assigned_to(full_name), creator:profiles!created_by(full_name)`)
+    const { data } = await supabase
+      .from('tasks')
+      .select('*')
       .eq('area', workspace)
       .order('created_at', { ascending: false })
     setTasks(data || [])
@@ -57,7 +58,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const channel = supabase.channel('tasks-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `area=eq.${workspace}` },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' },
         () => { loadTasks() }
       ).subscribe()
     return () => { supabase.removeChannel(channel) }
@@ -70,7 +71,7 @@ export default function Dashboard() {
 
   function openNewTask() {
     setEditingTask(null)
-    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', is_private:false })
+    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med' })
     setShowModal(true)
   }
 
@@ -86,8 +87,7 @@ export default function Dashboard() {
       category: task.category || 'Reklamacja',
       description: task.description || '',
       status: task.status || 'open',
-      priority: task.priority || 'med',
-      is_private: task.is_private || false
+      priority: task.priority || 'med'
     })
     setShowModal(true)
   }
@@ -103,15 +103,18 @@ export default function Dashboard() {
     setSaving(false)
     setShowModal(false)
     setEditingTask(null)
+    loadTasks()
   }
 
   async function handleDelete(taskId) {
     if (!confirm('Usunąć to zadanie?')) return
     await supabase.from('tasks').delete().eq('id', taskId)
+    loadTasks()
   }
 
   async function changeStatus(taskId, status) {
     await supabase.from('tasks').update({ status }).eq('id', taskId)
+    loadTasks()
   }
 
   const filtered = tasks.filter(t => {
@@ -207,8 +210,8 @@ export default function Dashboard() {
 
         <div style={{flex:1,overflow:'auto',padding:'12px 20px 20px'}}>
           <div style={{background:'white',borderRadius:'10px',border:'1px solid #e5e7eb',overflow:'hidden'}}>
-            <div style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 110px 110px 80px 80px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
-              {['Nr zamówienia','Zadanie / Klient','Marketplace','Status','Przypisano','Priorytet','Akcje'].map(h => (
+            <div style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 120px 80px 100px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
+              {['Nr zamówienia','Zadanie / Klient','Marketplace','Status','Priorytet','Akcje'].map(h => (
                 <span key={h} style={{fontSize:'11px',color:'#9ca3af',fontWeight:'500',textTransform:'uppercase',letterSpacing:'0.04em'}}>{h}</span>
               ))}
             </div>
@@ -216,7 +219,7 @@ export default function Dashboard() {
               <div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>Brak zadań w tym widoku</div>
             )}
             {filtered.map(task => (
-              <div key={task.id} style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 110px 110px 80px 80px',padding:'11px 16px',borderBottom:'1px solid #f3f4f6',alignItems:'center'}}
+              <div key={task.id} style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 120px 80px 100px',padding:'11px 16px',borderBottom:'1px solid #f3f4f6',alignItems:'center',background:'white'}}
                 onMouseEnter={e=>e.currentTarget.style.background='#f9fafb'}
                 onMouseLeave={e=>e.currentTarget.style.background='white'}>
                 <div>
@@ -236,17 +239,11 @@ export default function Dashboard() {
                     {Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
-                <div style={{fontSize:'12px',color:'#6b7280',display:'flex',alignItems:'center',gap:'5px'}}>
-                  <div style={{width:'20px',height:'20px',borderRadius:'50%',background:'#dbeafe',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'9px',fontWeight:'600',color:'#1d4ed8',flexShrink:0}}>
-                    {(task.assignee?.full_name||'?').substring(0,2).toUpperCase()}
-                  </div>
-                  {task.assignee?.full_name||'—'}
-                </div>
                 <div style={{display:'flex',alignItems:'center',gap:'5px'}}>
                   <span style={{width:'8px',height:'8px',borderRadius:'50%',background:PRIORITY_COLORS[task.priority],flexShrink:0,display:'inline-block'}}></span>
                   <span style={{fontSize:'11px',color:'#6b7280'}}>{task.priority==='high'?'Wysoki':task.priority==='med'?'Średni':'Niski'}</span>
                 </div>
-                <div style={{display:'flex',gap:'6px'}}>
+                <div style={{display:'flex',gap:'4px'}}>
                   <button onClick={()=>openEditTask(task)}
                     style={{padding:'4px 8px',fontSize:'11px',border:'1px solid #e5e7eb',borderRadius:'6px',cursor:'pointer',background:'white',color:'#374151'}}>
                     Edytuj
@@ -267,7 +264,7 @@ export default function Dashboard() {
           <div style={{background:'white',borderRadius:'12px',width:'540px',maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}}>
             <div style={{padding:'18px 20px 14px',borderBottom:'1px solid #e5e7eb',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
               <span style={{fontSize:'15px',fontWeight:'600'}}>{editingTask ? 'Edytuj zadanie' : 'Nowe zadanie'}</span>
-              <button onClick={() => setShowModal(false)} style={{border:'none',background:'none',fontSize:'18px',cursor:'pointer',color:'#9ca3af'}}>×</button>
+              <button onClick={() => setShowModal(false)} style={{border:'none',background:'none',fontSize:'18px',cursor:'pointer',color:'#9ca3af'}}>x</button>
             </div>
             <div style={{padding:'18px 20px'}}>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'12px'}}>
@@ -284,7 +281,7 @@ export default function Dashboard() {
               </div>
               <div style={{marginBottom:'12px'}}>
                 <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Nazwa produktu *</label>
-                <input value={form.product_name} onChange={e=>setForm({...form,product_name:e.target.value})} placeholder="np. Strawberry Slices 100g" required
+                <input value={form.product_name} onChange={e=>setForm({...form,product_name:e.target.value})} placeholder="np. Strawberry Slices 100g"
                   style={{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',outline:'none'}} />
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'12px'}}>
@@ -321,7 +318,7 @@ export default function Dashboard() {
                   <select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}
                     style={{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',outline:'none'}}>
                     <option value="high">Wysoki</option>
-                    <option value="med">Średni</option>
+                    <option value="med">Sredni</option>
                     <option value="low">Niski</option>
                   </select>
                 </div>
@@ -333,10 +330,10 @@ export default function Dashboard() {
                   </select>
                 </div>
               </div>
-              <div style={{marginBottom:'4px'}}>
-                <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Opis / Następny krok</label>
+              <div>
+                <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Opis / Nastepny krok</label>
                 <textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}
-                  placeholder="Opisz problem i co należy zrobić..."
+                  placeholder="Opisz problem i co nalezy zrobic..."
                   style={{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',outline:'none',height:'72px',resize:'vertical',fontFamily:'inherit'}} />
               </div>
             </div>
