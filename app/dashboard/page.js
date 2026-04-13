@@ -29,11 +29,11 @@ export default function Dashboard() {
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [notifications, setNotifications] = useState([])
+  const [editingTask, setEditingTask] = useState(null)
   const [form, setForm] = useState({
     order_number:'', claim_number:'', product_name:'', sku:'', client_name:'',
     marketplace:'Amazon UK', category:'Reklamacja', description:'',
-    status:'open', priority:'med', assigned_to:'', is_private: false
+    status:'open', priority:'med'
   })
 
   useEffect(() => {
@@ -46,56 +46,75 @@ export default function Dashboard() {
   }, [])
 
   const loadTasks = useCallback(async () => {
-    let query = supabase.from('tasks')
-      .select(`*, assignee:profiles!assigned_to(full_name), creator:profiles!created_by(full_name)`)
+    const { data } = await supabase
+      .from('tasks')
+      .select('*')
       .eq('area', workspace)
       .order('created_at', { ascending: false })
-    const { data } = await query
     setTasks(data || [])
   }, [workspace])
 
   useEffect(() => { loadTasks() }, [loadTasks])
 
-  // Real-time subscription
   useEffect(() => {
     const channel = supabase.channel('tasks-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: `area=eq.${workspace}` },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' },
         () => { loadTasks() }
       ).subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [workspace, loadTasks])
-
-  // Notifications real-time
-  useEffect(() => {
-    if (!user) return
-    const channel = supabase.channel('notifs')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-        ({ new: n }) => setNotifications(prev => [n, ...prev])
-      ).subscribe()
-    return () => { supabase.removeChannel(channel) }
-  }, [user])
 
   async function handleLogout() {
     await supabase.auth.signOut()
     router.push('/')
   }
 
+  function openNewTask() {
+    setEditingTask(null)
+    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med' })
+    setShowModal(true)
+  }
+
+  function openEditTask(task) {
+    setEditingTask(task)
+    setForm({
+      order_number: task.order_number || '',
+      claim_number: task.claim_number || '',
+      product_name: task.product_name || '',
+      sku: task.sku || '',
+      client_name: task.client_name || '',
+      marketplace: task.marketplace || 'Amazon UK',
+      category: task.category || 'Reklamacja',
+      description: task.description || '',
+      status: task.status || 'open',
+      priority: task.priority || 'med'
+    })
+    setShowModal(true)
+  }
+
   async function handleSave() {
     if (!form.product_name) return
     setSaving(true)
-    await supabase.from('tasks').insert({
-      ...form,
-      area: workspace,
-      created_by: user.id,
-      assigned_to: form.assigned_to || null,
-    })
+    if (editingTask) {
+      await supabase.from('tasks').update({ ...form }).eq('id', editingTask.id)
+    } else {
+      await supabase.from('tasks').insert({ ...form, area: workspace, created_by: user.id })
+    }
     setSaving(false)
     setShowModal(false)
-    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'', is_private:false })
+    setEditingTask(null)
+    loadTasks()
+  }
+
+  async function handleDelete(taskId) {
+    if (!confirm('Usunąć to zadanie?')) return
+    await supabase.from('tasks').delete().eq('id', taskId)
+    loadTasks()
   }
 
   async function changeStatus(taskId, status) {
     await supabase.from('tasks').update({ status }).eq('id', taskId)
+    loadTasks()
   }
 
   const filtered = tasks.filter(t => {
@@ -121,14 +140,11 @@ export default function Dashboard() {
 
   return (
     <div style={{display:'flex',height:'100vh',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',fontSize:'14px'}}>
-
-      {/* SIDEBAR */}
       <div style={{width:'220px',background:'white',borderRight:'1px solid #e5e7eb',display:'flex',flexDirection:'column',flexShrink:0}}>
         <div style={{padding:'18px 16px 14px',borderBottom:'1px solid #e5e7eb'}}>
           <div style={{fontWeight:'600',fontSize:'15px'}}>TaskFlow</div>
           <div style={{fontSize:'11px',color:'#9ca3af',marginTop:'2px'}}>Jamo Operations</div>
         </div>
-
         <div style={{padding:'10px 12px',borderBottom:'1px solid #e5e7eb'}}>
           <div style={{fontSize:'10px',color:'#9ca3af',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'6px'}}>Workspace</div>
           {WORKSPACES.map(ws => (
@@ -138,7 +154,6 @@ export default function Dashboard() {
             </button>
           ))}
         </div>
-
         <nav style={{padding:'10px 8px',flex:1}}>
           {[
             { key:'all', label:'Wszystkie', count:counts.all },
@@ -155,7 +170,6 @@ export default function Dashboard() {
             </button>
           ))}
         </nav>
-
         <div style={{padding:'12px 16px',borderTop:'1px solid #e5e7eb',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div>
             <div style={{fontSize:'12px',fontWeight:'500'}}>{profile?.full_name || user?.email?.split('@')[0]}</div>
@@ -165,31 +179,21 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* MAIN */}
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',background:'#f9fafb'}}>
-
-        {/* Live bar */}
         <div style={{background:'#d1fae5',borderBottom:'1px solid #a7f3d0',padding:'5px 20px',fontSize:'12px',color:'#065f46',display:'flex',alignItems:'center',gap:'6px'}}>
           <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'#059669',display:'inline-block'}}></span>
           Połączono — zmiany synchronizują się na żywo na wszystkich urządzeniach
-          {notifications.length > 0 && <span style={{marginLeft:'auto',background:'#059669',color:'white',borderRadius:'10px',padding:'1px 8px',fontSize:'11px'}}>{notifications.length} nowych</span>}
         </div>
-
-        {/* Topbar */}
         <div style={{background:'white',borderBottom:'1px solid #e5e7eb',padding:'0 20px',height:'52px',display:'flex',alignItems:'center',gap:'12px'}}>
           <span style={{fontSize:'15px',fontWeight:'500',flex:1}}>{WORKSPACES.find(w=>w.key===workspace)?.label}</span>
-          <input
-            value={search} onChange={e=>setSearch(e.target.value)}
-            placeholder="Szukaj zamówienia, klienta, reklamacji..."
-            style={{padding:'7px 12px',border:'1px solid #e5e7eb',borderRadius:'8px',fontSize:'13px',width:'260px',outline:'none'}}
-          />
-          <button onClick={() => setShowModal(true)}
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Szukaj zamówienia, klienta..."
+            style={{padding:'7px 12px',border:'1px solid #e5e7eb',borderRadius:'8px',fontSize:'13px',width:'260px',outline:'none'}} />
+          <button onClick={openNewTask}
             style={{background:'#111',color:'white',border:'none',borderRadius:'8px',padding:'8px 16px',fontSize:'13px',fontWeight:'500',cursor:'pointer',whiteSpace:'nowrap'}}>
             + Nowe zadanie
           </button>
         </div>
 
-        {/* Stats */}
         <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'10px',padding:'16px 20px 0'}}>
           {[
             { label:'Wszystkie', val:counts.all, color:'#111' },
@@ -204,23 +208,18 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Table */}
         <div style={{flex:1,overflow:'auto',padding:'12px 20px 20px'}}>
           <div style={{background:'white',borderRadius:'10px',border:'1px solid #e5e7eb',overflow:'hidden'}}>
-            <div style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 100px 110px 90px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
-              {['Nr zamówienia','Zadanie / Klient','Marketplace','Status','Przypisano','Priorytet'].map(h => (
+            <div style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 120px 80px 100px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
+              {['Nr zamówienia','Zadanie / Klient','Marketplace','Status','Priorytet','Akcje'].map(h => (
                 <span key={h} style={{fontSize:'11px',color:'#9ca3af',fontWeight:'500',textTransform:'uppercase',letterSpacing:'0.04em'}}>{h}</span>
               ))}
             </div>
-
             {filtered.length === 0 && (
-              <div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>
-                Brak zadań w tym widoku
-              </div>
+              <div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>Brak zadań w tym widoku</div>
             )}
-
             {filtered.map(task => (
-              <div key={task.id} style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 100px 110px 90px',padding:'11px 16px',borderBottom:'1px solid #f3f4f6',alignItems:'center',cursor:'pointer'}}
+              <div key={task.id} style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 120px 80px 100px',padding:'11px 16px',borderBottom:'1px solid #f3f4f6',alignItems:'center',background:'white'}}
                 onMouseEnter={e=>e.currentTarget.style.background='#f9fafb'}
                 onMouseLeave={e=>e.currentTarget.style.background='white'}>
                 <div>
@@ -240,15 +239,19 @@ export default function Dashboard() {
                     {Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
-                <div style={{fontSize:'12px',color:'#6b7280',display:'flex',alignItems:'center',gap:'5px'}}>
-                  <div style={{width:'20px',height:'20px',borderRadius:'50%',background:'#dbeafe',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'9px',fontWeight:'600',color:'#1d4ed8',flexShrink:0}}>
-                    {(task.assignee?.full_name||'?').substring(0,2).toUpperCase()}
-                  </div>
-                  {task.assignee?.full_name||'—'}
-                </div>
                 <div style={{display:'flex',alignItems:'center',gap:'5px'}}>
                   <span style={{width:'8px',height:'8px',borderRadius:'50%',background:PRIORITY_COLORS[task.priority],flexShrink:0,display:'inline-block'}}></span>
                   <span style={{fontSize:'11px',color:'#6b7280'}}>{task.priority==='high'?'Wysoki':task.priority==='med'?'Średni':'Niski'}</span>
+                </div>
+                <div style={{display:'flex',gap:'4px'}}>
+                  <button onClick={()=>openEditTask(task)}
+                    style={{padding:'4px 8px',fontSize:'11px',border:'1px solid #e5e7eb',borderRadius:'6px',cursor:'pointer',background:'white',color:'#374151'}}>
+                    Edytuj
+                  </button>
+                  <button onClick={()=>handleDelete(task.id)}
+                    style={{padding:'4px 8px',fontSize:'11px',border:'1px solid #fee2e2',borderRadius:'6px',cursor:'pointer',background:'#fff5f5',color:'#dc2626'}}>
+                    Usuń
+                  </button>
                 </div>
               </div>
             ))}
@@ -256,13 +259,12 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* MODAL */}
       {showModal && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50}}>
           <div style={{background:'white',borderRadius:'12px',width:'540px',maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}}>
             <div style={{padding:'18px 20px 14px',borderBottom:'1px solid #e5e7eb',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-              <span style={{fontSize:'15px',fontWeight:'600'}}>Nowe zadanie</span>
-              <button onClick={() => setShowModal(false)} style={{border:'none',background:'none',fontSize:'18px',cursor:'pointer',color:'#9ca3af'}}>×</button>
+              <span style={{fontSize:'15px',fontWeight:'600'}}>{editingTask ? 'Edytuj zadanie' : 'Nowe zadanie'}</span>
+              <button onClick={() => setShowModal(false)} style={{border:'none',background:'none',fontSize:'18px',cursor:'pointer',color:'#9ca3af'}}>x</button>
             </div>
             <div style={{padding:'18px 20px'}}>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'12px'}}>
@@ -279,7 +281,7 @@ export default function Dashboard() {
               </div>
               <div style={{marginBottom:'12px'}}>
                 <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Nazwa produktu *</label>
-                <input value={form.product_name} onChange={e=>setForm({...form,product_name:e.target.value})} placeholder="np. Strawberry Slices 100g" required
+                <input value={form.product_name} onChange={e=>setForm({...form,product_name:e.target.value})} placeholder="np. Strawberry Slices 100g"
                   style={{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',outline:'none'}} />
               </div>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'12px'}}>
@@ -316,7 +318,7 @@ export default function Dashboard() {
                   <select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})}
                     style={{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',outline:'none'}}>
                     <option value="high">Wysoki</option>
-                    <option value="med">Średni</option>
+                    <option value="med">Sredni</option>
                     <option value="low">Niski</option>
                   </select>
                 </div>
@@ -328,10 +330,10 @@ export default function Dashboard() {
                   </select>
                 </div>
               </div>
-              <div style={{marginBottom:'4px'}}>
-                <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Opis / Następny krok</label>
+              <div>
+                <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Opis / Nastepny krok</label>
                 <textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}
-                  placeholder="Opisz problem i co należy zrobić..."
+                  placeholder="Opisz problem i co nalezy zrobic..."
                   style={{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',outline:'none',height:'72px',resize:'vertical',fontFamily:'inherit'}} />
               </div>
             </div>
@@ -339,7 +341,7 @@ export default function Dashboard() {
               <button onClick={() => setShowModal(false)} style={{padding:'8px 16px',border:'1px solid #d1d5db',borderRadius:'8px',background:'white',fontSize:'13px',cursor:'pointer',color:'#374151'}}>Anuluj</button>
               <button onClick={handleSave} disabled={saving}
                 style={{padding:'8px 18px',background:'#111',color:'white',border:'none',borderRadius:'8px',fontSize:'13px',fontWeight:'500',cursor:'pointer',opacity:saving?0.7:1}}>
-                {saving ? 'Zapisywanie...' : 'Zapisz zadanie'}
+                {saving ? 'Zapisywanie...' : editingTask ? 'Zapisz zmiany' : 'Zapisz zadanie'}
               </button>
             </div>
           </div>
