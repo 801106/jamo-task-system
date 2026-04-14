@@ -24,6 +24,7 @@ export default function Dashboard() {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
   const [tasks, setTasks] = useState([])
+  const [users, setUsers] = useState([])
   const [workspace, setWorkspace] = useState('jamo_healthy')
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
@@ -33,7 +34,7 @@ export default function Dashboard() {
   const [form, setForm] = useState({
     order_number:'', claim_number:'', product_name:'', sku:'', client_name:'',
     marketplace:'Amazon UK', category:'Reklamacja', description:'',
-    status:'open', priority:'med'
+    status:'open', priority:'med', assigned_to:''
   })
 
   useEffect(() => {
@@ -43,12 +44,13 @@ export default function Dashboard() {
       supabase.from('profiles').select('*').eq('id', user.id).single()
         .then(({ data }) => setProfile(data))
     })
+    supabase.from('profiles').select('id, full_name').then(({ data }) => setUsers(data || []))
   }, [])
 
   const loadTasks = useCallback(async () => {
     const { data } = await supabase
       .from('tasks')
-      .select('*')
+      .select('*, assigned_profile:profiles!assigned_to(full_name)')
       .eq('area', workspace)
       .order('created_at', { ascending: false })
     setTasks(data || [])
@@ -71,7 +73,7 @@ export default function Dashboard() {
 
   function openNewTask() {
     setEditingTask(null)
-    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med' })
+    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'' })
     setShowModal(true)
   }
 
@@ -87,7 +89,8 @@ export default function Dashboard() {
       category: task.category || 'Reklamacja',
       description: task.description || '',
       status: task.status || 'open',
-      priority: task.priority || 'med'
+      priority: task.priority || 'med',
+      assigned_to: task.assigned_to || ''
     })
     setShowModal(true)
   }
@@ -95,10 +98,14 @@ export default function Dashboard() {
   async function handleSave() {
     if (!form.product_name) return
     setSaving(true)
+    const payload = {
+      ...form,
+      assigned_to: form.assigned_to || null
+    }
     if (editingTask) {
-      await supabase.from('tasks').update({ ...form }).eq('id', editingTask.id)
+      await supabase.from('tasks').update(payload).eq('id', editingTask.id)
     } else {
-      await supabase.from('tasks').insert({ ...form, area: workspace, created_by: user.id })
+      await supabase.from('tasks').insert({ ...payload, area: workspace, created_by: user.id })
     }
     setSaving(false)
     setShowModal(false)
@@ -121,6 +128,7 @@ export default function Dashboard() {
     if (filter === 'urgent' && t.status !== 'urgent') return false
     if (filter === 'open' && !['open','inprogress','waiting'].includes(t.status)) return false
     if (filter === 'done' && t.status !== 'done') return false
+    if (filter === 'mine' && t.assigned_to !== user?.id) return false
     if (search) {
       const q = search.toLowerCase()
       return (t.order_number||'').toLowerCase().includes(q) ||
@@ -136,6 +144,7 @@ export default function Dashboard() {
     open: tasks.filter(t => ['open','inprogress','waiting'].includes(t.status)).length,
     urgent: tasks.filter(t => t.status === 'urgent').length,
     done: tasks.filter(t => t.status === 'done').length,
+    mine: tasks.filter(t => t.assigned_to === user?.id).length,
   }
 
   return (
@@ -157,6 +166,7 @@ export default function Dashboard() {
         <nav style={{padding:'10px 8px',flex:1}}>
           {[
             { key:'all', label:'Wszystkie', count:counts.all },
+            { key:'mine', label:'Moje zadania', count:counts.mine, blue:true },
             { key:'open', label:'Otwarte', count:counts.open },
             { key:'urgent', label:'Pilne', count:counts.urgent, red:true },
             { key:'done', label:'Zamkniete', count:counts.done },
@@ -164,7 +174,10 @@ export default function Dashboard() {
             <button key={item.key} onClick={() => setFilter(item.key)}
               style={{display:'flex',alignItems:'center',width:'100%',textAlign:'left',padding:'7px 8px',borderRadius:'6px',fontSize:'13px',cursor:'pointer',border:'none',background:filter===item.key?'#f3f4f6':'transparent',color:filter===item.key?'#111':'#6b7280',fontWeight:filter===item.key?'500':'400',marginBottom:'2px'}}>
               {item.label}
-              <span style={{marginLeft:'auto',fontSize:'11px',background:item.red&&item.count?'#fee2e2':'#f3f4f6',color:item.red&&item.count?'#991b1b':'#6b7280',padding:'1px 6px',borderRadius:'10px'}}>
+              <span style={{marginLeft:'auto',fontSize:'11px',
+                background:item.red&&item.count?'#fee2e2':item.blue&&item.count?'#dbeafe':'#f3f4f6',
+                color:item.red&&item.count?'#991b1b':item.blue&&item.count?'#1d4ed8':'#6b7280',
+                padding:'1px 6px',borderRadius:'10px'}}>
                 {item.count}
               </span>
             </button>
@@ -197,7 +210,7 @@ export default function Dashboard() {
         <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'10px',padding:'16px 20px 0'}}>
           {[
             { label:'Wszystkie', val:counts.all, color:'#111' },
-            { label:'Otwarte', val:counts.open, color:'#1d4ed8' },
+            { label:'Moje', val:counts.mine, color:'#1d4ed8' },
             { label:'Pilne', val:counts.urgent, color:'#dc2626' },
             { label:'Zamkniete', val:counts.done, color:'#059669' },
           ].map(s => (
@@ -210,8 +223,8 @@ export default function Dashboard() {
 
         <div style={{flex:1,overflow:'auto',padding:'12px 20px 20px'}}>
           <div style={{background:'white',borderRadius:'10px',border:'1px solid #e5e7eb',overflow:'hidden'}}>
-            <div style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 120px 80px 110px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
-              {['Nr zamowienia','Zadanie / Klient','Marketplace','Status','Priorytet','Akcje'].map(h => (
+            <div style={{display:'grid',gridTemplateColumns:'100px 1fr 100px 120px 100px 80px 110px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
+              {['Nr zam.','Zadanie / Klient','Marketplace','Status','Przypisano','Priorytet','Akcje'].map(h => (
                 <span key={h} style={{fontSize:'11px',color:'#9ca3af',fontWeight:'500',textTransform:'uppercase',letterSpacing:'0.04em'}}>{h}</span>
               ))}
             </div>
@@ -219,7 +232,7 @@ export default function Dashboard() {
               <div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>Brak zadan w tym widoku</div>
             )}
             {filtered.map(task => (
-              <div key={task.id} style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 120px 80px 110px',padding:'11px 16px',borderBottom:'1px solid #f3f4f6',alignItems:'center',background:'white'}}
+              <div key={task.id} style={{display:'grid',gridTemplateColumns:'100px 1fr 100px 120px 100px 80px 110px',padding:'11px 16px',borderBottom:'1px solid #f3f4f6',alignItems:'center',background:'white'}}
                 onMouseEnter={e=>e.currentTarget.style.background='#f9fafb'}
                 onMouseLeave={e=>e.currentTarget.style.background='white'}>
                 <div>
@@ -238,6 +251,16 @@ export default function Dashboard() {
                       color:STATUS_COLORS[task.status]?.color||'#374151'}}>
                     {Object.entries(STATUS_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
                   </select>
+                </div>
+                <div style={{fontSize:'12px',color:'#6b7280',display:'flex',alignItems:'center',gap:'5px'}}>
+                  {task.assigned_profile?.full_name ? (
+                    <>
+                      <div style={{width:'20px',height:'20px',borderRadius:'50%',background:'#dbeafe',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'9px',fontWeight:'600',color:'#1d4ed8',flexShrink:0}}>
+                        {task.assigned_profile.full_name.substring(0,2).toUpperCase()}
+                      </div>
+                      {task.assigned_profile.full_name}
+                    </>
+                  ) : <span style={{color:'#d1d5db'}}>—</span>}
                 </div>
                 <div style={{display:'flex',alignItems:'center',gap:'5px'}}>
                   <span style={{width:'8px',height:'8px',borderRadius:'50%',background:PRIORITY_COLORS[task.priority],flexShrink:0,display:'inline-block'}}></span>
@@ -329,6 +352,14 @@ export default function Dashboard() {
                     {Object.entries(STATUS_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}
                   </select>
                 </div>
+              </div>
+              <div style={{marginBottom:'12px'}}>
+                <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Przypisz do</label>
+                <select value={form.assigned_to} onChange={e=>setForm({...form,assigned_to:e.target.value})}
+                  style={{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',outline:'none'}}>
+                  <option value="">— Nieprzypisane —</option>
+                  {users.map(u=><option key={u.id} value={u.id}>{u.full_name || u.id}</option>)}
+                </select>
               </div>
               <div>
                 <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Opis / Nastepny krok</label>
