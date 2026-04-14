@@ -9,7 +9,7 @@ const WORKSPACES = [
   { key: 'private', label: 'Private' },
 ]
 
-const STATUS_LABELS = { open:'Otwarte', inprogress:'W trakcie', waiting:'Oczekuje', done:'Zamknięte', urgent:'Pilne' }
+const STATUS_LABELS = { open:'Otwarte', inprogress:'W trakcie', waiting:'Oczekuje', done:'Zamkniete', urgent:'Pilne' }
 const STATUS_COLORS = {
   open: { bg:'#dbeafe', color:'#1d4ed8' },
   inprogress: { bg:'#fef3c7', color:'#92400e' },
@@ -107,7 +107,7 @@ export default function Dashboard() {
   }
 
   async function handleDelete(taskId) {
-    if (!confirm('Usunąć to zadanie?')) return
+    if (!confirm('Usunac to zadanie?')) return
     await supabase.from('tasks').delete().eq('id', taskId)
     loadTasks()
   }
@@ -159,7 +159,7 @@ export default function Dashboard() {
             { key:'all', label:'Wszystkie', count:counts.all },
             { key:'open', label:'Otwarte', count:counts.open },
             { key:'urgent', label:'Pilne', count:counts.urgent, red:true },
-            { key:'done', label:'Zamknięte', count:counts.done },
+            { key:'done', label:'Zamkniete', count:counts.done },
           ].map(item => (
             <button key={item.key} onClick={() => setFilter(item.key)}
               style={{display:'flex',alignItems:'center',width:'100%',textAlign:'left',padding:'7px 8px',borderRadius:'6px',fontSize:'13px',cursor:'pointer',border:'none',background:filter===item.key?'#f3f4f6':'transparent',color:filter===item.key?'#111':'#6b7280',fontWeight:filter===item.key?'500':'400',marginBottom:'2px'}}>
@@ -173,7 +173,7 @@ export default function Dashboard() {
         <div style={{padding:'12px 16px',borderTop:'1px solid #e5e7eb',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
           <div>
             <div style={{fontSize:'12px',fontWeight:'500'}}>{profile?.full_name || user?.email?.split('@')[0]}</div>
-            <div style={{fontSize:'11px',color:'#9ca3af'}}>{profile?.role === 'admin' ? 'Admin' : 'Użytkownik'}</div>
+            <div style={{fontSize:'11px',color:'#9ca3af'}}>{profile?.role === 'admin' ? 'Admin' : 'Uzytkownik'}</div>
           </div>
           <button onClick={handleLogout} style={{fontSize:'11px',color:'#9ca3af',border:'none',background:'none',cursor:'pointer'}}>Wyloguj</button>
         </div>
@@ -182,11 +182,11 @@ export default function Dashboard() {
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',background:'#f9fafb'}}>
         <div style={{background:'#d1fae5',borderBottom:'1px solid #a7f3d0',padding:'5px 20px',fontSize:'12px',color:'#065f46',display:'flex',alignItems:'center',gap:'6px'}}>
           <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'#059669',display:'inline-block'}}></span>
-          Połączono — zmiany synchronizują się na żywo na wszystkich urządzeniach
+          Polaczono - zmiany synchronizuja sie na zywo na wszystkich urzadzeniach
         </div>
         <div style={{background:'white',borderBottom:'1px solid #e5e7eb',padding:'0 20px',height:'52px',display:'flex',alignItems:'center',gap:'12px'}}>
           <span style={{fontSize:'15px',fontWeight:'500',flex:1}}>{WORKSPACES.find(w=>w.key===workspace)?.label}</span>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Szukaj zamówienia, klienta..."
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Szukaj zamowienia, klienta..."
             style={{padding:'7px 12px',border:'1px solid #e5e7eb',borderRadius:'8px',fontSize:'13px',width:'260px',outline:'none'}} />
           <button onClick={openNewTask}
             style={{background:'#111',color:'white',border:'none',borderRadius:'8px',padding:'8px 16px',fontSize:'13px',fontWeight:'500',cursor:'pointer',whiteSpace:'nowrap'}}>
@@ -199,7 +199,7 @@ export default function Dashboard() {
             { label:'Wszystkie', val:counts.all, color:'#111' },
             { label:'Otwarte', val:counts.open, color:'#1d4ed8' },
             { label:'Pilne', val:counts.urgent, color:'#dc2626' },
-            { label:'Zamknięte', val:counts.done, color:'#059669' },
+            { label:'Zamkniete', val:counts.done, color:'#059669' },
           ].map(s => (
             <div key={s.label} style={{background:'white',borderRadius:'8px',padding:'12px 14px',border:'1px solid #e5e7eb'}}>
               <div style={{fontSize:'11px',color:'#9ca3af',marginBottom:'4px'}}>{s.label}</div>
@@ -210,16 +210,16 @@ export default function Dashboard() {
 
         <div style={{flex:1,overflow:'auto',padding:'12px 20px 20px'}}>
           <div style={{background:'white',borderRadius:'10px',border:'1px solid #e5e7eb',overflow:'hidden'}}>
-            <div style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 120px 80px 100px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
-              {['Nr zamówienia','Zadanie / Klient','Marketplace','Status','Priorytet','Akcje'].map(h => (
+            <div style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 120px 80px 110px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
+              {['Nr zamowienia','Zadanie / Klient','Marketplace','Status','Priorytet','Akcje'].map(h => (
                 <span key={h} style={{fontSize:'11px',color:'#9ca3af',fontWeight:'500',textTransform:'uppercase',letterSpacing:'0.04em'}}>{h}</span>
               ))}
             </div>
             {filtered.length === 0 && (
-              <div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>Brak zadań w tym widoku</div>
+              <div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>Brak zadan w tym widoku</div>
             )}
             {filtered.map(task => (
-              <div key={task.id} style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 120px 80px 100px',padding:'11px 16px',borderBottom:'1px solid #f3f4f6',alignItems:'center',background:'white'}}
+              <div key={task.id} style={{display:'grid',gridTemplateColumns:'100px 1fr 110px 120px 80px 110px',padding:'11px 16px',borderBottom:'1px solid #f3f4f6',alignItems:'center',background:'white'}}
                 onMouseEnter={e=>e.currentTarget.style.background='#f9fafb'}
                 onMouseLeave={e=>e.currentTarget.style.background='white'}>
                 <div>
@@ -241,7 +241,7 @@ export default function Dashboard() {
                 </div>
                 <div style={{display:'flex',alignItems:'center',gap:'5px'}}>
                   <span style={{width:'8px',height:'8px',borderRadius:'50%',background:PRIORITY_COLORS[task.priority],flexShrink:0,display:'inline-block'}}></span>
-                  <span style={{fontSize:'11px',color:'#6b7280'}}>{task.priority==='high'?'Wysoki':task.priority==='med'?'Średni':'Niski'}</span>
+                  <span style={{fontSize:'11px',color:'#6b7280'}}>{task.priority==='high'?'Wysoki':task.priority==='med'?'Sredni':'Niski'}</span>
                 </div>
                 <div style={{display:'flex',gap:'4px'}}>
                   <button onClick={()=>openEditTask(task)}
@@ -250,7 +250,7 @@ export default function Dashboard() {
                   </button>
                   <button onClick={()=>handleDelete(task.id)}
                     style={{padding:'4px 8px',fontSize:'11px',border:'1px solid #fee2e2',borderRadius:'6px',cursor:'pointer',background:'#fff5f5',color:'#dc2626'}}>
-                    Usuń
+                    Usun
                   </button>
                 </div>
               </div>
@@ -269,7 +269,7 @@ export default function Dashboard() {
             <div style={{padding:'18px 20px'}}>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'12px',marginBottom:'12px'}}>
                 <div>
-                  <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Nr zamówienia</label>
+                  <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Nr zamowienia</label>
                   <input value={form.order_number} onChange={e=>setForm({...form,order_number:e.target.value})} placeholder="ORD-2026-001"
                     style={{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',outline:'none'}} />
                 </div>
@@ -301,7 +301,7 @@ export default function Dashboard() {
                   <label style={{display:'block',fontSize:'12px',fontWeight:'500',marginBottom:'4px',color:'#374151'}}>Marketplace</label>
                   <select value={form.marketplace} onChange={e=>setForm({...form,marketplace:e.target.value})}
                     style={{width:'100%',padding:'8px 10px',border:'1px solid #d1d5db',borderRadius:'6px',fontSize:'13px',outline:'none'}}>
-                    {['Amazon UK','eBay UK','Sklep własny','Allegro','Inne'].map(m=><option key={m}>{m}</option>)}
+                    {['Amazon UK','eBay UK','Sklep wlasny','Allegro','Inne'].map(m=><option key={m}>{m}</option>)}
                   </select>
                 </div>
                 <div>
