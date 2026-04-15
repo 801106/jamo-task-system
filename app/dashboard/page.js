@@ -327,7 +327,7 @@ export default function Dashboard() {
         <div style={{padding:'12px 16px',borderTop:'1px solid #e5e7eb'}}>
           <div style={{fontSize:'12px',fontWeight:'500',marginBottom:'4px'}}>{profile?.full_name || user?.email?.split('@')[0]}</div>
           <div style={{fontSize:'11px',color:'#9ca3af',marginBottom:'10px'}}>{profile?.role==='admin'?t.admin:t.user}</div>
-          <button onClick={()=>router.push('/account')} style={{display:'block',fontSize:'11px',color:'#6b7280',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'6px'}}>{t.myAccount}</button>
+          <button onClick={()=>router.push('/account')} style={{display:'block',fontSize:'11px',color:'#6b7280',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'6px'}}>{t.myAccount}</button>{profile?.role==='admin'&&<button onClick={()=>router.push('/admin')} style={{display:'block',fontSize:'11px',color:'#7c3aed',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'6px',fontWeight:'500'}}>Panel admina</button>}
           <button onClick={handleLogout} style={{display:'block',fontSize:'11px',color:'#9ca3af',border:'none',background:'none',cursor:'pointer',padding:'0'}}>{t.logout}</button>
         </div>
       </div>
