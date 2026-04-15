@@ -230,7 +230,7 @@ export default function Dashboard() {
             <div style={{fontSize:'12px',fontWeight:'500'}}>{profile?.full_name || user?.email?.split('@')[0]}</div>
             <div style={{fontSize:'11px',color:'#9ca3af'}}>{profile?.role === 'admin' ? 'Admin' : 'Uzytkownik'}</div>
           </div>
-          <button onClick={handleLogout} style={{fontSize:'11px',color:'#9ca3af',border:'none',background:'none',cursor:'pointer'}}>Wyloguj</button>
+          <div style={{display:'flex',flexDirection:'column',gap:'4px'}}><button onClick={()=>router.push('/account')} style={{fontSize:'11px',color:'#6b7280',border:'none',background:'none',cursor:'pointer',textAlign:'left'}}>Moje konto</button><button onClick={handleLogout} style={{fontSize:'11px',color:'#9ca3af',border:'none',background:'none',cursor:'pointer',textAlign:'left'}}>Wyloguj</button></div>
         </div>
       </div>
 
