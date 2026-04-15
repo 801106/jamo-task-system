@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useRouter } from 'next/navigation'
 
@@ -29,8 +29,13 @@ export default function Dashboard() {
   const [filter, setFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
+  const [showDetailModal, setShowDetailModal] = useState(false)
+  const [selectedTask, setSelectedTask] = useState(null)
+  const [taskFiles, setTaskFiles] = useState([])
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
+  const fileInputRef = useRef(null)
   const [form, setForm] = useState({
     order_number:'', claim_number:'', product_name:'', sku:'', client_name:'',
     marketplace:'Amazon UK', category:'Reklamacja', description:'',
@@ -66,6 +71,32 @@ export default function Dashboard() {
     return () => { supabase.removeChannel(channel) }
   }, [workspace, loadTasks])
 
+  async function loadTaskFiles(taskId) {
+    const { data } = await supabase.storage.from('task-files').list(taskId)
+    setTaskFiles(data || [])
+  }
+
+  async function handleFileUpload(e) {
+    const file = e.target.files[0]
+    if (!file || !selectedTask) return
+    setUploading(true)
+    const filePath = `${selectedTask.id}/${Date.now()}_${file.name}`
+    await supabase.storage.from('task-files').upload(filePath, file)
+    await loadTaskFiles(selectedTask.id)
+    setUploading(false)
+  }
+
+  async function handleFileDelete(fileName) {
+    if (!confirm('Usunac ten plik?')) return
+    await supabase.storage.from('task-files').remove([`${selectedTask.id}/${fileName}`])
+    await loadTaskFiles(selectedTask.id)
+  }
+
+  async function getFileUrl(fileName) {
+    const { data } = await supabase.storage.from('task-files').createSignedUrl(`${selectedTask.id}/${fileName}`, 3600)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+
   async function handleLogout() {
     await supabase.auth.signOut()
     router.push('/')
@@ -95,13 +126,16 @@ export default function Dashboard() {
     setShowModal(true)
   }
 
+  async function openTaskDetail(task) {
+    setSelectedTask(task)
+    setShowDetailModal(true)
+    await loadTaskFiles(task.id)
+  }
+
   async function handleSave() {
     if (!form.product_name) return
     setSaving(true)
-    const payload = {
-      ...form,
-      assigned_to: form.assigned_to || null
-    }
+    const payload = { ...form, assigned_to: form.assigned_to || null }
     if (editingTask) {
       await supabase.from('tasks').update(payload).eq('id', editingTask.id)
     } else {
@@ -145,6 +179,14 @@ export default function Dashboard() {
     urgent: tasks.filter(t => t.status === 'urgent').length,
     done: tasks.filter(t => t.status === 'done').length,
     mine: tasks.filter(t => t.assigned_to === user?.id).length,
+  }
+
+  const getFileIcon = (name) => {
+    if (name.match(/\.(jpg|jpeg|png|gif|webp)$/i)) return 'IMG'
+    if (name.match(/\.(pdf)$/i)) return 'PDF'
+    if (name.match(/\.(doc|docx)$/i)) return 'DOC'
+    if (name.match(/\.(xls|xlsx)$/i)) return 'XLS'
+    return 'FILE'
   }
 
   return (
@@ -195,7 +237,7 @@ export default function Dashboard() {
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',background:'#f9fafb'}}>
         <div style={{background:'#d1fae5',borderBottom:'1px solid #a7f3d0',padding:'5px 20px',fontSize:'12px',color:'#065f46',display:'flex',alignItems:'center',gap:'6px'}}>
           <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'#059669',display:'inline-block'}}></span>
-          Polaczono - zmiany synchronizuja sie na zywo na wszystkich urzadzeniach
+          Polaczono - zmiany synchronizuja sie na zywo
         </div>
         <div style={{background:'white',borderBottom:'1px solid #e5e7eb',padding:'0 20px',height:'52px',display:'flex',alignItems:'center',gap:'12px'}}>
           <span style={{fontSize:'15px',fontWeight:'500',flex:1}}>{WORKSPACES.find(w=>w.key===workspace)?.label}</span>
@@ -223,7 +265,7 @@ export default function Dashboard() {
 
         <div style={{flex:1,overflow:'auto',padding:'12px 20px 20px'}}>
           <div style={{background:'white',borderRadius:'10px',border:'1px solid #e5e7eb',overflow:'hidden'}}>
-            <div style={{display:'grid',gridTemplateColumns:'100px 1fr 100px 120px 100px 80px 110px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
+            <div style={{display:'grid',gridTemplateColumns:'100px 1fr 100px 120px 100px 80px 140px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
               {['Nr zam.','Zadanie / Klient','Marketplace','Status','Przypisano','Priorytet','Akcje'].map(h => (
                 <span key={h} style={{fontSize:'11px',color:'#9ca3af',fontWeight:'500',textTransform:'uppercase',letterSpacing:'0.04em'}}>{h}</span>
               ))}
@@ -232,7 +274,7 @@ export default function Dashboard() {
               <div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>Brak zadan w tym widoku</div>
             )}
             {filtered.map(task => (
-              <div key={task.id} style={{display:'grid',gridTemplateColumns:'100px 1fr 100px 120px 100px 80px 110px',padding:'11px 16px',borderBottom:'1px solid #f3f4f6',alignItems:'center',background:'white'}}
+              <div key={task.id} style={{display:'grid',gridTemplateColumns:'100px 1fr 100px 120px 100px 80px 140px',padding:'11px 16px',borderBottom:'1px solid #f3f4f6',alignItems:'center',background:'white'}}
                 onMouseEnter={e=>e.currentTarget.style.background='#f9fafb'}
                 onMouseLeave={e=>e.currentTarget.style.background='white'}>
                 <div>
@@ -266,13 +308,17 @@ export default function Dashboard() {
                   <span style={{width:'8px',height:'8px',borderRadius:'50%',background:PRIORITY_COLORS[task.priority],flexShrink:0,display:'inline-block'}}></span>
                   <span style={{fontSize:'11px',color:'#6b7280'}}>{task.priority==='high'?'Wysoki':task.priority==='med'?'Sredni':'Niski'}</span>
                 </div>
-                <div style={{display:'flex',gap:'4px'}}>
+                <div style={{display:'flex',gap:'3px'}}>
+                  <button onClick={()=>openTaskDetail(task)}
+                    style={{padding:'4px 7px',fontSize:'11px',border:'1px solid #bbf7d0',borderRadius:'6px',cursor:'pointer',background:'#f0fdf4',color:'#059669'}}>
+                    Pliki
+                  </button>
                   <button onClick={()=>openEditTask(task)}
-                    style={{padding:'4px 8px',fontSize:'11px',border:'1px solid #e5e7eb',borderRadius:'6px',cursor:'pointer',background:'white',color:'#374151'}}>
+                    style={{padding:'4px 7px',fontSize:'11px',border:'1px solid #e5e7eb',borderRadius:'6px',cursor:'pointer',background:'white',color:'#374151'}}>
                     Edytuj
                   </button>
                   <button onClick={()=>handleDelete(task.id)}
-                    style={{padding:'4px 8px',fontSize:'11px',border:'1px solid #fee2e2',borderRadius:'6px',cursor:'pointer',background:'#fff5f5',color:'#dc2626'}}>
+                    style={{padding:'4px 7px',fontSize:'11px',border:'1px solid #fee2e2',borderRadius:'6px',cursor:'pointer',background:'#fff5f5',color:'#dc2626'}}>
                     Usun
                   </button>
                 </div>
@@ -281,6 +327,66 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {showDetailModal && selectedTask && (
+        <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50}}>
+          <div style={{background:'white',borderRadius:'12px',width:'540px',maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto'}}>
+            <div style={{padding:'18px 20px 14px',borderBottom:'1px solid #e5e7eb',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+              <div>
+                <div style={{fontSize:'15px',fontWeight:'600'}}>{selectedTask.product_name}</div>
+                <div style={{fontSize:'12px',color:'#6b7280',marginTop:'2px'}}>{selectedTask.order_number} {selectedTask.client_name ? '· ' + selectedTask.client_name : ''}</div>
+              </div>
+              <button onClick={() => setShowDetailModal(false)} style={{border:'none',background:'none',fontSize:'18px',cursor:'pointer',color:'#9ca3af'}}>x</button>
+            </div>
+            <div style={{padding:'18px 20px'}}>
+              {selectedTask.description && (
+                <div style={{marginBottom:'20px',padding:'12px',background:'#f9fafb',borderRadius:'8px',fontSize:'13px',color:'#374151',lineHeight:'1.5'}}>
+                  {selectedTask.description}
+                </div>
+              )}
+              <div style={{marginBottom:'12px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                <div style={{fontSize:'13px',fontWeight:'600',color:'#111'}}>Zalaczniki ({taskFiles.length})</div>
+                <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+                  style={{padding:'6px 14px',background:'#111',color:'white',border:'none',borderRadius:'8px',fontSize:'12px',fontWeight:'500',cursor:'pointer',opacity:uploading?0.7:1}}>
+                  {uploading ? 'Wgrywanie...' : '+ Dodaj plik'}
+                </button>
+                <input ref={fileInputRef} type="file" style={{display:'none'}} onChange={handleFileUpload}
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp" />
+              </div>
+
+              {taskFiles.length === 0 && (
+                <div style={{padding:'24px',textAlign:'center',color:'#9ca3af',fontSize:'13px',border:'2px dashed #e5e7eb',borderRadius:'8px'}}>
+                  Brak zalacznikow — kliknij "+ Dodaj plik"
+                </div>
+              )}
+
+              {taskFiles.map(file => (
+                <div key={file.name} style={{display:'flex',alignItems:'center',gap:'10px',padding:'10px 12px',border:'1px solid #e5e7eb',borderRadius:'8px',marginBottom:'8px'}}>
+                  <div style={{width:'36px',height:'36px',borderRadius:'6px',background:'#f3f4f6',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'10px',fontWeight:'600',color:'#6b7280',flexShrink:0}}>
+                    {getFileIcon(file.name)}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:'13px',fontWeight:'500',color:'#111',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {file.name.replace(/^\d+_/, '')}
+                    </div>
+                    <div style={{fontSize:'11px',color:'#9ca3af'}}>
+                      {file.metadata?.size ? `${Math.round(file.metadata.size / 1024)} KB` : ''}
+                    </div>
+                  </div>
+                  <button onClick={() => getFileUrl(file.name)}
+                    style={{padding:'4px 10px',fontSize:'11px',border:'1px solid #e5e7eb',borderRadius:'6px',cursor:'pointer',background:'white',color:'#374151',whiteSpace:'nowrap'}}>
+                    Pobierz
+                  </button>
+                  <button onClick={() => handleFileDelete(file.name)}
+                    style={{padding:'4px 8px',fontSize:'11px',border:'1px solid #fee2e2',borderRadius:'6px',cursor:'pointer',background:'#fff5f5',color:'#dc2626'}}>
+                    Usun
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50}}>
