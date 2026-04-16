@@ -240,13 +240,13 @@ export default function Dashboard() {
     const payload = { ...form, assigned_to:form.assigned_to||null, deadline:form.deadline||null }
     if (editingTask) {
       if (form.assigned_to && form.assigned_to!==editingTask.assigned_to) {
-        await supabase.functions.invoke('send-push', { body: { user_id:form.assigned_to, title:'Nowe zadanie przypisane', body:`Przypisano Ci: ${form.product_name}`, url:'/dashboard' } })
+        await fetch('/api/send-push', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ user_id:form.assigned_to, title:'Nowe zadanie przypisane', body:`Przypisano Ci: ${form.product_name}`, url:'/dashboard' }) })
       }
       await supabase.from('tasks').update(payload).eq('id', editingTask.id)
     } else {
       await supabase.from('tasks').insert({ ...payload, area:workspace, created_by:user.id })
       if (form.assigned_to && form.assigned_to!==user.id) {
-        await supabase.functions.invoke('send-push', { body: { user_id:form.assigned_to, title:'Nowe zadanie przypisane', body:`Przypisano Ci: ${form.product_name}`, url:'/dashboard' } })
+        await fetch('/api/send-push', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ user_id:form.assigned_to, title:'Nowe zadanie przypisane', body:`Przypisano Ci: ${form.product_name}`, url:'/dashboard' }) })
       }
     }
     setSaving(false); setShowModal(false); setEditingTask(null); loadTasks()
@@ -398,6 +398,9 @@ export default function Dashboard() {
           <button onClick={enableNotifications} disabled={notifBtnStyle.disabled}
             style={{display:'block',width:'100%',textAlign:'left',fontSize:'11px',color:notifBtnStyle.color,background:notifBtnStyle.bg,border:'1px solid #e8e8e6',borderRadius:'6px',cursor:notifBtnStyle.disabled?'default':'pointer',padding:'5px 8px',marginBottom:'8px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>
             {notifBtnStyle.label}
+          </button>
+          <button onClick={()=>router.push('/messages')} style={{display:'block',fontSize:'11px',color:'#2563eb',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>
+            {lang==='pl'?'Wiadomosci':'Messages'}
           </button>
           <button onClick={()=>router.push('/reports')} style={{display:'block',fontSize:'11px',color:'#16a34a',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>{t.reports}</button>
           <button onClick={()=>router.push('/account')} style={{display:'block',fontSize:'11px',color:'#6b7280',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontFamily:"'DM Sans', sans-serif"}}>{t.account}</button>
