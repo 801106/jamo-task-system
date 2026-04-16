@@ -4,42 +4,32 @@
 
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap');
 
-* { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
 
 :root {
-  --font-main: 'DM Sans', -apple-system, sans-serif;
-  --font-mono: 'DM Mono', monospace;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --sidebar-w: 224px;
-  --color-accent: #111111;
-  --color-accent-light: #f4f4f3;
-  --color-border: #e8e8e6;
-  --color-border-light: #f0f0ee;
-  --color-text: #111111;
-  --color-text-secondary: #6b7280;
-  --color-text-tertiary: #9ca3af;
-  --color-bg: #fafaf9;
-  --color-bg-card: #ffffff;
-  --color-urgent: #dc2626;
-  --color-urgent-bg: #fef2f2;
-  --color-success: #16a34a;
-  --color-success-bg: #f0fdf4;
-  --color-warning: #d97706;
-  --color-warning-bg: #fffbeb;
-  --color-info: #2563eb;
-  --color-info-bg: #eff6ff;
+  --font: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: 'DM Mono', monospace;
+  --border: #e8e8e6;
+  --border-light: #f0f0ee;
+  --text: #111111;
+  --text-2: #6b7280;
+  --text-3: #9ca3af;
+  --bg: #f5f5f3;
+  --bg-card: #ffffff;
+  --bg-hover: #eef2ff;
+  --zebra: #f7f7f5;
+  --accent: #111111;
+  --blue: #2563eb;
+  --green: #16a34a;
+  --red: #dc2626;
+  --purple: #7c3aed;
 }
 
-html, body { height: 100%; margin: 0; }
-body { font-family: var(--font-main); font-size: 14px; color: var(--color-text); background: var(--color-bg); -webkit-font-smoothing: antialiased; }
+html, body { height: 100%; margin: 0; padding: 0; }
+body { font-family: var(--font); font-size: 14px; color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 
+* { font-family: var(--font); }
 ::selection { background: #111; color: white; }
-
-input, select, textarea, button { font-family: var(--font-main); }
-
-::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
