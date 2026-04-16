@@ -126,6 +126,10 @@ const S = {
   metaLabel: { fontSize:'10px', color:'#9ca3af', marginBottom:'4px', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:'500' },
 }
 
+function FormField({ label, children }) {
+  return <div><label style={S.label}>{label}</label>{children}</div>
+}
+
 export default function Dashboard() {
   const router = useRouter()
   const [lang, setLang] = useState('pl')
@@ -334,9 +338,7 @@ export default function Dashboard() {
     </div>
   )
 
-  const FormField = ({ label, children }) => (
-    <div><label style={S.label}>{label}</label>{children}</div>
-  )
+
 
   return (
     <div style={{display:'flex',height:'100vh',fontFamily:"'DM Sans', -apple-system, sans-serif",fontSize:'14px'}}>
