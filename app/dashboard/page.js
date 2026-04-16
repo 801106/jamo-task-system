@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useRouter } from 'next/navigation'
 
-const VAPID_PUBLIC_KEY = 'BCI4hI24IAO-huGItBsiWo-ksZvTseqrQ0VeOR79fgfJFHFBr28KqresdvZOdhyjQRGMi9YBmZG0rD-WU4JYdqk'
+const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ''
 
 const WORKSPACES = [
   { key: 'jamo_healthy', label: 'Jamo + Healthy' },
