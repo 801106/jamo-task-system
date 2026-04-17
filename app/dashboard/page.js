@@ -244,9 +244,9 @@ function ChatPanel({user,profile,lang,chatUsers,chatSelected,setChatSelected,cha
             </div>
           </div>
         </div>
-      </div>
       )}
     </div>
+  </div>
   )
 }
 
