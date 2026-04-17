@@ -178,7 +178,16 @@ function ChatPanel({user,profile,lang,chatUsers,chatSelected,setChatSelected,cha
               return (
                 <div key={msg.id} style={{display:'flex',flexDirection:'column',alignItems:isMine?'flex-end':'flex-start',maxWidth:'85%',alignSelf:isMine?'flex-end':'flex-start'}}>
                   {msg.task_ref&&<div style={{display:'inline-flex',alignItems:'center',gap:'4px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'5px',padding:'2px 7px',fontSize:'10px',color:'#1d4ed8',fontWeight:'500',marginBottom:'3px'}}><div style={{width:'4px',height:'4px',borderRadius:'50%',background:'#2563eb'}}></div>{msg.task_ref}</div>}
-                  {msg.content&&<div style={{padding:'8px 12px',borderRadius:'10px',fontSize:'12px',lineHeight:'1.5',background:isMine?'#111':'#fff',color:isMine?'white':'#111',border:isMine?'none':'1px solid #e8e8e6'}}>{msg.content}</div>}
+                  {msg.content&&(
+                    msg.task_ref && !isMine ? (
+                      <div style={{padding:'9px 13px',borderRadius:'10px',fontSize:'12px',lineHeight:'1.5',background:'#eff6ff',border:'1px solid #bfdbfe',color:'#1d4ed8'}}>
+                        {msg.content}
+                        <div style={{marginTop:'4px',fontSize:'10px',color:'#93c5fd'}}>Kliknij task powyzej aby otworzyc</div>
+                      </div>
+                    ) : (
+                      <div style={{padding:'8px 12px',borderRadius:'10px',fontSize:'12px',lineHeight:'1.5',background:isMine?'#111':'#fff',color:isMine?'white':'#111',border:isMine?'none':'1px solid #e8e8e6'}}>{msg.content}</div>
+                    )
+                  )}
                   {msg.file_url&&(
                     <a href={msg.file_url} target="_blank" rel="noopener noreferrer" style={{textDecoration:'none'}}>
                       <div style={{display:'flex',alignItems:'center',gap:'8px',padding:'8px 11px',borderRadius:'9px',background:'#fff',border:'1px solid #e8e8e6'}}>
@@ -235,6 +244,7 @@ function ChatPanel({user,profile,lang,chatUsers,chatSelected,setChatSelected,cha
             </div>
           </div>
         </div>
+      </div>
       )}
     </div>
   )
@@ -369,13 +379,25 @@ export default function Dashboard() {
     const payload = { ...form, assigned_to:form.assigned_to||null, deadline:form.deadline||null }
     if (editingTask) {
       if (form.assigned_to && form.assigned_to!==editingTask.assigned_to) {
-        await fetch('/api/send-push', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ user_id:form.assigned_to, title:'Nowe zadanie przypisane', body:`Przypisano Ci: ${form.product_name}`, url:'/dashboard' }) })
+        await supabase.from('messages').insert({
+          sender_id: user.id,
+          receiver_id: form.assigned_to,
+          content: `Przypisano Ci zadanie: ${form.product_name}`,
+          task_id: editingTask.id,
+          task_ref: `#${editingTask.order_number||editingTask.id.substring(0,6).toUpperCase()} · ${form.product_name}`,
+        })
       }
       await supabase.from('tasks').update(payload).eq('id', editingTask.id)
     } else {
-      await supabase.from('tasks').insert({ ...payload, area:workspace, created_by:user.id })
-      if (form.assigned_to && form.assigned_to!==user.id) {
-        await fetch('/api/send-push', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ user_id:form.assigned_to, title:'Nowe zadanie przypisane', body:`Przypisano Ci: ${form.product_name}`, url:'/dashboard' }) })
+      const { data: newTask } = await supabase.from('tasks').insert({ ...payload, area:workspace, created_by:user.id }).select().single()
+      if (form.assigned_to && form.assigned_to!==user.id && newTask) {
+        await supabase.from('messages').insert({
+          sender_id: user.id,
+          receiver_id: form.assigned_to,
+          content: `Przypisano Ci nowe zadanie: ${form.product_name}`,
+          task_id: newTask.id,
+          task_ref: `#${newTask.order_number||newTask.id.substring(0,6).toUpperCase()} · ${form.product_name}`,
+        })
       }
     }
     setSaving(false); setShowModal(false); setEditingTask(null); loadTasks()
