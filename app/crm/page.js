@@ -406,7 +406,7 @@ export default function CRM() {
               <div style={{ width:'28px', height:'28px', background:'#f0f4ff', borderRadius:'7px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px' }}>🔗</div>
               <div>
                 <div style={{ fontSize:'13px', fontWeight:'600', color:'#111' }}>BaseLinker Sync</div>
-                <div style={{ fontSize:'11px', color:'#9ca3af' }}>Auto-import klientow z Amazon, eBay, OnBuy, WooCommerce</div>
+                <div style={{ fontSize:'11px', color:'#9ca3af' }}>Auto-import co 6h — Amazon, eBay, OnBuy, WooCommerce, Shopify</div>
               </div>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:'8px', marginLeft:'auto' }}>
