@@ -85,6 +85,11 @@ export default function CRM() {
   const [newNote, setNewNote] = useState('')
   const [noteType, setNoteType] = useState('note')
   const [savingNote, setSavingNote] = useState(false)
+  const [showAlerts, setShowAlerts] = useState(true)
+  const [viewMode, setViewMode] = useState('list')
+  const [blSyncing, setBlSyncing] = useState(false)
+  const [blResult, setBlResult] = useState(null)
+  const [blDays, setBlDays] = useState(30)
   const [detailTab, setDetailTab] = useState('timeline')
   const [clientTasks, setClientTasks] = useState([])
 
@@ -235,6 +240,58 @@ export default function CRM() {
   }
 
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString(lang==='pl'?'pl-PL':'en-GB') : '—'
+
+  // Alert logic
+  const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d).getTime()) / (1000*60*60*24)) : null
+  
+  const alerts = clients.filter(c => {
+    if (c.segment !== 'b2b' && c.segment !== 'giftbox') return false
+    if (c.status === 'lost' || c.status === 'done') return false
+    const days = daysSince(c.last_contact_date)
+    if (c.status === 'active' && days !== null && days >= 90) return true
+    if (c.status === 'quote' && days !== null && days >= 7) return true
+    if (c.status === 'sample' && days !== null && days >= 10) return true
+    if (c.status === 'contact' && days !== null && days >= 5) return true
+    if (c.status === 'lead' && days !== null && days >= 3) return true
+    return false
+  }).map(c => {
+    const days = daysSince(c.last_contact_date)
+    const messages = {
+      active: `Brak kontaktu od ${days} dni — ryzyko utraty klienta`,
+      quote: `Wycena bez odpowiedzi od ${days} dni — zrob follow-up`,
+      sample: `Probka wyslana ${days} dni temu — zapytaj o feedback`,
+      contact: `W kontakcie od ${days} dni — wyslij wycene`,
+      lead: `Nowy lead bez kontaktu od ${days} dni`,
+    }
+    return { client: c, message: messages[c.status] || `Brak kontaktu od ${days} dni`, days, urgent: days >= 90 || (c.status === 'quote' && days >= 14) }
+  }).sort((a,b) => b.days - a.days)
+
+  // Auto-flag inactive B2B clients
+  async function syncBaseLinker() {
+    setBlSyncing(true)
+    setBlResult(null)
+    try {
+      const res = await fetch('/api/baselinker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days_back: blDays })
+      })
+      const data = await res.json()
+      setBlResult(data)
+      if (data.success) loadClients()
+    } catch (e) {
+      setBlResult({ error: e.message })
+    }
+    setBlSyncing(false)
+  }
+
+  async function autoFlagInactive() {
+    const toFlag = clients.filter(c => c.segment === 'b2b' && c.status === 'active' && daysSince(c.last_contact_date) >= 90)
+    for (const c of toFlag) {
+      await supabase.from('clients').update({ status: 'inactive' }).eq('id', c.id)
+    }
+    if (toFlag.length > 0) loadClients()
+  }
   const fmtDT = (d) => d ? new Date(d).toLocaleString(lang==='pl'?'pl-PL':'en-GB', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''
   const initials = (n) => (n||'?').split(' ').map(x=>x[0]).join('').toUpperCase().substring(0,2)
 
@@ -276,6 +333,14 @@ export default function CRM() {
             </button>
           </div>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Szukaj klienta..." style={{ ...S.input, width:'200px' }} />
+          <div style={{ display:'flex', border:'1px solid #e8e8e6', borderRadius:'8px', overflow:'hidden', flexShrink:0 }}>
+            {[{key:'list',icon:'☰'},{key:'kanban',icon:'⊞'}].map(v => (
+              <button key={v.key} onClick={() => setViewMode(v.key)}
+                style={{ padding:'7px 11px', border:'none', background: viewMode===v.key?'#111':'#fff', color: viewMode===v.key?'white':'#6b7280', cursor:'pointer', fontSize:'13px', fontFamily:"'DM Sans',sans-serif" }}>
+                {v.icon}
+              </button>
+            ))}
+          </div>
           <button onClick={openNew} style={S.btnPrimary}>+ Nowy klient</button>
         </div>
 
@@ -295,6 +360,79 @@ export default function CRM() {
               </div>
             ))}
           </div>
+
+          {/* ALERTS PANEL */}
+          {alerts.length > 0 && showAlerts && (
+            <div style={{ background:'#fff', border:'1px solid #fde68a', borderRadius:'10px', marginBottom:'14px', overflow:'hidden' }}>
+              <div style={{ padding:'10px 14px', background:'#fffbeb', borderBottom:'1px solid #fde68a', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'7px' }}>
+                  <span style={{ fontSize:'14px' }}>⚠️</span>
+                  <span style={{ fontSize:'13px', fontWeight:'600', color:'#92400e' }}>
+                    {alerts.length} {lang==='pl' ? 'klientow wymaga uwagi' : 'clients need attention'}
+                  </span>
+                </div>
+                <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
+                  <button onClick={autoFlagInactive} style={{ fontSize:'11px', padding:'3px 10px', background:'#92400e', color:'white', border:'none', borderRadius:'5px', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>
+                    Auto-oznacz nieaktywnych
+                  </button>
+                  <button onClick={() => setShowAlerts(false)} style={{ fontSize:'16px', background:'none', border:'none', cursor:'pointer', color:'#9ca3af', lineHeight:'1' }}>×</button>
+                </div>
+              </div>
+              <div style={{ maxHeight:'200px', overflowY:'auto' }}>
+                {alerts.slice(0,8).map(({ client: c, message, urgent }) => (
+                  <div key={c.id} onClick={() => openDetail(c)}
+                    style={{ display:'flex', alignItems:'center', gap:'10px', padding:'9px 14px', borderBottom:'1px solid #fef9c3', cursor:'pointer', background: urgent ? '#fef2f2' : '#fff' }}
+                    onMouseEnter={e => e.currentTarget.style.background = urgent ? '#fee2e2' : '#fefce8'}
+                    onMouseLeave={e => e.currentTarget.style.background = urgent ? '#fef2f2' : '#fff'}>
+                    <div style={{ width:'28px', height:'28px', borderRadius:'50%', background: urgent ? '#fef2f2' : '#fffbeb', color: urgent ? '#dc2626' : '#92400e', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:'600', flexShrink:0 }}>
+                      {(c.company_name||c.contact_name||'?').substring(0,2).toUpperCase()}
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontSize:'12px', fontWeight:'500', color:'#111' }}>{c.company_name || c.contact_name}</div>
+                      <div style={{ fontSize:'11px', color: urgent ? '#dc2626' : '#92400e' }}>{message}</div>
+                    </div>
+                    <span style={{ fontSize:'10px', fontWeight:'500', padding:'2px 7px', borderRadius:'10px', background: urgent?'#fef2f2':'#fffbeb', color: urgent?'#dc2626':'#92400e', flexShrink:0 }}>
+                      {(() => { const m = (STATUSES[c.segment]||[]).find(s=>s.key===c.status); return m ? (lang==='pl'?m.label:m.labelEn) : c.status })()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* BASELINKER SYNC PANEL */}
+          <div style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', padding:'12px 16px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+              <div style={{ width:'28px', height:'28px', background:'#f0f4ff', borderRadius:'7px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px' }}>🔗</div>
+              <div>
+                <div style={{ fontSize:'13px', fontWeight:'600', color:'#111' }}>BaseLinker Sync</div>
+                <div style={{ fontSize:'11px', color:'#9ca3af' }}>Auto-import klientow z Amazon, eBay, OnBuy, WooCommerce</div>
+              </div>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:'8px', marginLeft:'auto' }}>
+              <select value={blDays} onChange={e => setBlDays(Number(e.target.value))}
+                style={{ padding:'6px 10px', border:'1px solid #e8e8e6', borderRadius:'7px', fontSize:'12px', outline:'none', fontFamily:"'DM Sans',sans-serif" }}>
+                <option value={7}>Ostatnie 7 dni</option>
+                <option value={30}>Ostatnie 30 dni</option>
+                <option value={90}>Ostatnie 90 dni</option>
+                <option value={365}>Ostatni rok</option>
+              </select>
+              <button onClick={syncBaseLinker} disabled={blSyncing}
+                style={{ display:'flex', alignItems:'center', gap:'6px', padding:'7px 14px', background: blSyncing?'#6b7280':'#111', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'500', cursor: blSyncing?'default':'pointer', fontFamily:"'DM Sans',sans-serif" }}>
+                {blSyncing ? (
+                  <><div style={{ width:'12px', height:'12px', border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'white', borderRadius:'50%', animation:'spin 0.8s linear infinite' }}></div> Synchronizuje...</>
+                ) : (
+                  <>↻ Synchronizuj</>
+                )}
+              </button>
+            </div>
+            {blResult && (
+              <div style={{ width:'100%', padding:'8px 12px', borderRadius:'7px', background: blResult.error ? '#fef2f2' : '#f0fdf4', border: `1px solid ${blResult.error ? '#fecaca' : '#bbf7d0'}`, fontSize:'12px', color: blResult.error ? '#dc2626' : '#065f46' }}>
+                {blResult.error ? `Blad: ${blResult.error}` : `✅ Zsynchronizowano ${blResult.orders_processed} zamowien — ${blResult.clients_created} nowych klientow, ${blResult.clients_updated} zaktualizowanych`}
+              </div>
+            )}
+          </div>
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
 
           {/* STATUS FILTER BAR */}
           {segFilter !== 'all' && (
@@ -363,10 +501,54 @@ export default function CRM() {
               )
             })}
           </div>
+
+          {/* KANBAN VIEW */}
+          {viewMode === 'kanban' && segFilter === 'b2b' && (
+            <div style={{ display:'flex', gap:'10px', overflowX:'auto', paddingBottom:'10px', marginTop:'14px' }}>
+              {STATUSES.b2b.filter(s => s.key !== 'lost').map(status => {
+                const colClients = filtered.filter(c => c.segment === 'b2b' && c.status === status.key)
+                return (
+                  <div key={status.key} style={{ minWidth:'200px', flex:'0 0 200px' }}>
+                    <div style={{ padding:'8px 10px', borderRadius:'8px 8px 0 0', background:status.bg, border:`1px solid ${status.color}30`, borderBottom:'none', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                      <span style={{ fontSize:'11px', fontWeight:'600', color:status.color }}>{lang==='pl'?status.label:status.labelEn}</span>
+                      <span style={{ fontSize:'11px', fontWeight:'600', color:status.color, background:'white', padding:'1px 6px', borderRadius:'10px' }}>{colClients.length}</span>
+                    </div>
+                    <div style={{ background:'#fafaf9', border:`1px solid ${status.color}30`, borderTop:'none', borderRadius:'0 0 8px 8px', minHeight:'100px', padding:'6px' }}>
+                      {colClients.map(c => (
+                        <div key={c.id} onClick={() => openDetail(c)}
+                          style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'7px', padding:'9px 10px', marginBottom:'6px', cursor:'pointer' }}
+                          onMouseEnter={e => e.currentTarget.style.borderColor = status.color}
+                          onMouseLeave={e => e.currentTarget.style.borderColor = '#e8e8e6'}>
+                          <div style={{ fontSize:'12px', fontWeight:'500', color:'#111', marginBottom:'3px' }}>{c.company_name || c.contact_name}</div>
+                          {c.company_name && <div style={{ fontSize:'10px', color:'#9ca3af', marginBottom:'4px' }}>{c.contact_name}</div>}
+                          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                            <span style={{ fontSize:'10px', color:'#9ca3af' }}>{c.source}</span>
+                            {c.ltv > 0 && <span style={{ fontSize:'10px', fontWeight:'600', color:'#065f46' }}>£{Number(c.ltv).toLocaleString()}</span>}
+                          </div>
+                          {c.is_vip && <span style={{ fontSize:'9px', background:'#fffbeb', color:'#92400e', border:'1px solid #fde68a', borderRadius:'3px', padding:'1px 4px', display:'inline-block', marginTop:'3px' }}>⭐ VIP</span>}
+                          {daysSince(c.last_contact_date) >= 7 && c.status !== 'active' && (
+                            <div style={{ fontSize:'9px', color:'#dc2626', marginTop:'3px' }}>⚠️ {daysSince(c.last_contact_date)}d bez kontaktu</div>
+                          )}
+                        </div>
+                      ))}
+                      {colClients.length === 0 && <div style={{ textAlign:'center', color:'#d1d5db', fontSize:'11px', padding:'20px 0' }}>brak</div>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {viewMode === 'kanban' && segFilter !== 'b2b' && (
+            <div style={{ textAlign:'center', color:'#9ca3af', fontSize:'13px', padding:'40px', background:'#fff', borderRadius:'10px', border:'1px solid #e8e8e6', marginTop:'14px' }}>
+              Widok Kanban dostepny dla segmentu B2B — wybierz filtr B2B powyzej
+            </div>
+          )}
+
         </div>
       </div>
 
-      {/* DETAIL PANEL */}
+      {/* DETAIL PANEL */}}
       {showDetail && selectedClient && (
         <div style={{ width:'380px', background:'#fff', borderLeft:'1px solid #e8e8e6', display:'flex', flexDirection:'column', flexShrink:0 }}>
           <div style={{ padding:'14px 16px', borderBottom:'1px solid #e8e8e6', display:'flex', alignItems:'center', gap:'10px' }}>
