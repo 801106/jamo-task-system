@@ -548,7 +548,7 @@ export default function CRM() {
         </div>
       </div>
 
-      {/* DETAIL PANEL */}}
+      {/* DETAIL PANEL */}
       {showDetail && selectedClient && (
         <div style={{ width:'380px', background:'#fff', borderLeft:'1px solid #e8e8e6', display:'flex', flexDirection:'column', flexShrink:0 }}>
           <div style={{ padding:'14px 16px', borderBottom:'1px solid #e8e8e6', display:'flex', alignItems:'center', gap:'10px' }}>
