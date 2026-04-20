@@ -179,7 +179,8 @@ export default function Dashboard() {
   const chatFileRef = useRef(null)
   const chatInputRef = useRef(null)
   const fileRef = useRef(null)
-  const [form, setForm] = useState({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'', deadline:'' })
+  const [form, setForm] = useState({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'', deadline:'', client_id:'' })
+  const [crmClients, setCrmClients] = useState([])
 
   useEffect(() => {
     const saved = localStorage.getItem('tf_lang'); if (saved) setLang(saved)
@@ -189,6 +190,7 @@ export default function Dashboard() {
       supabase.from('profiles').select('*').eq('id', user.id).single().then(({ data }) => setProfile(data))
     })
     supabase.from('profiles').select('id, full_name').then(({ data }) => setUsers(data || []))
+    supabase.from('clients').select('id, company_name, contact_name, segment').order('company_name').then(({ data }) => setCrmClients(data || []))
 
     // Auto-logout warning after 7.5 hours, logout after 8 hours
     const warnTimer = setTimeout(() => setShowTimeoutWarning(true), 7.5 * 60 * 60 * 1000)
@@ -238,12 +240,15 @@ export default function Dashboard() {
 
   function openNew() {
     setEditingTask(null)
-    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'', deadline:'' })
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
+    const clientId = params?.get('client_id') || ''
+    const clientName = params?.get('client_name') || ''
+    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:clientName, marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'', deadline:'', client_id:clientId })
     setShowModal(true)
   }
   function openEdit(task) {
     setEditingTask(task)
-    setForm({ order_number:task.order_number||'', claim_number:task.claim_number||'', product_name:task.product_name||'', sku:task.sku||'', client_name:task.client_name||'', marketplace:task.marketplace||'Amazon UK', category:task.category||'Reklamacja', description:task.description||'', status:task.status||'open', priority:task.priority||'med', assigned_to:task.assigned_to||'', deadline:task.deadline?task.deadline.split('T')[0]:'' })
+    setForm({ order_number:task.order_number||'', claim_number:task.claim_number||'', product_name:task.product_name||'', sku:task.sku||'', client_name:task.client_name||'', marketplace:task.marketplace||'Amazon UK', category:task.category||'Reklamacja', description:task.description||'', status:task.status||'open', priority:task.priority||'med', assigned_to:task.assigned_to||'', deadline:task.deadline?task.deadline.split('T')[0]:'', client_id:task.client_id||'' })
     setShowModal(true)
   }
   async function openDetail(task) { setSelectedTask(task); setShowDetail(true); await loadFiles(task.id); await loadComments(task.id) }
@@ -261,7 +266,7 @@ export default function Dashboard() {
   async function handleSave() {
     if (!form.product_name) return
     setSaving(true)
-    const payload = { ...form, assigned_to:form.assigned_to||null, deadline:form.deadline||null }
+    const payload = { ...form, assigned_to:form.assigned_to||null, deadline:form.deadline||null, client_id:form.client_id||null }
     if (editingTask) {
       if (form.assigned_to && form.assigned_to!==editingTask.assigned_to) {
         await supabase.from('messages').insert({
@@ -790,6 +795,18 @@ export default function Dashboard() {
                   </select>
                 </FormField>
                 <FormField label={t.f_deadline}><input type="date" value={form.deadline} onChange={e=>setForm({...form,deadline:e.target.value})} style={S.input} /></FormField>
+              </div>
+              {crmClients.length>0&&(
+                <div style={{marginBottom:'12px'}}>
+                  <FormField label="Klient CRM (opcjonalnie)">
+                    <select value={form.client_id} onChange={e=>setForm({...form,client_id:e.target.value})} style={S.select}>
+                      <option value="">— Brak powiazania z CRM —</option>
+                      {crmClients.map(c=><option key={c.id} value={c.id}>{c.company_name||c.contact_name}</option>)}
+                    </select>
+                  </FormField>
+                </div>
+              )}
+              <div style={{display:'none'}}>
               </div>
               <FormField label={t.f_desc}>
                 <textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder={t.f_desc} style={{...S.input, height:'72px', resize:'vertical'}} />

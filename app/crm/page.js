@@ -85,6 +85,8 @@ export default function CRM() {
   const [newNote, setNewNote] = useState('')
   const [noteType, setNoteType] = useState('note')
   const [savingNote, setSavingNote] = useState(false)
+  const [detailTab, setDetailTab] = useState('timeline')
+  const [clientTasks, setClientTasks] = useState([])
 
   useEffect(() => {
     const saved = localStorage.getItem('tf_lang'); if (saved) setLang(saved)
@@ -118,7 +120,22 @@ export default function CRM() {
   async function openDetail(client) {
     setSelectedClient(client)
     setShowDetail(true)
+    setDetailTab('timeline')
     await loadInteractions(client.id)
+    await loadClientTasks(client.id)
+  }
+
+  async function loadClientTasks(clientId) {
+    const { data } = await supabase.from('tasks')
+      .select('*')
+      .eq('client_id', clientId)
+      .order('created_at', { ascending: false })
+    setClientTasks(data || [])
+  }
+
+  async function createTaskForClient() {
+    if (!selectedClient) return
+    router.push('/dashboard?client_id=' + selectedClient.id + '&client_name=' + encodeURIComponent(selectedClient.company_name || selectedClient.contact_name))
   }
 
   function openNew() {
@@ -392,7 +409,21 @@ export default function CRM() {
             </div>
           </div>
 
+          {/* TABS */}
+          <div style={{ display:'flex', borderBottom:'1px solid #e8e8e6', flexShrink:0 }}>
+            {[
+              { key:'timeline', label:'Historia' },
+              { key:'tasks', label:`Zadania (${clientTasks.length})` },
+            ].map(tab => (
+              <button key={tab.key} onClick={() => setDetailTab(tab.key)}
+                style={{ flex:1, padding:'9px', fontSize:'12px', fontWeight:'500', border:'none', background:'transparent', cursor:'pointer', color:detailTab===tab.key?'#111':'#9ca3af', borderBottom:detailTab===tab.key?'2px solid #111':'2px solid transparent', fontFamily:"'DM Sans',sans-serif" }}>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
           {/* TIMELINE */}
+          {detailTab==='timeline' && (
           <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>
             <div style={{ fontSize:'10px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.06em', fontWeight:'500', marginBottom:'10px' }}>Historia interakcji</div>
 
@@ -429,6 +460,44 @@ export default function CRM() {
             ))}
             {interactions.length === 0 && <div style={{ fontSize:'12px', color:'#9ca3af', textAlign:'center', marginTop:'20px' }}>Brak historii — dodaj pierwsza notatke</div>}
           </div>
+          )}
+
+          {/* TASKS TAB */}
+          {detailTab==='tasks' && (
+          <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
+              <div style={{ fontSize:'10px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.06em', fontWeight:'500' }}>Zadania powiazane</div>
+              <button onClick={createTaskForClient} style={{ fontSize:'11px', padding:'4px 10px', background:'#111', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>+ Nowe zadanie</button>
+            </div>
+            {clientTasks.length === 0 && (
+              <div style={{ textAlign:'center', color:'#9ca3af', fontSize:'12px', marginTop:'20px' }}>
+                <div style={{ marginBottom:'8px' }}>Brak powiazanych zadan</div>
+                <button onClick={createTaskForClient} style={{ fontSize:'12px', padding:'6px 14px', background:'#f4f4f3', color:'#374151', border:'1px solid #e8e8e6', borderRadius:'7px', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>Stworz pierwsze zadanie</button>
+              </div>
+            )}
+            {clientTasks.map(task => {
+              const statusColors = { open:'#1d4ed8', inprogress:'#92400e', waiting:'#6d28d9', done:'#065f46', urgent:'#dc2626' }
+              const statusBg = { open:'#eff6ff', inprogress:'#fffbeb', waiting:'#f5f3ff', done:'#ecfdf5', urgent:'#fef2f2' }
+              const statusLabel = { open:'Otwarte', inprogress:'W trakcie', waiting:'Oczekuje', done:'Zamkniete', urgent:'Pilne' }
+              return (
+                <div key={task.id} style={{ marginBottom:'8px', padding:'10px 12px', background:'#fafaf9', border:'1px solid #f0f0ee', borderRadius:'8px' }}>
+                  <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'8px' }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:'12px', fontWeight:'500', color:'#111', marginBottom:'3px' }}>{task.product_name}</div>
+                      <div style={{ fontSize:'10px', color:'#9ca3af' }}>
+                        {task.order_number && <span style={{ color:'#2563eb', fontWeight:'500', marginRight:'6px' }}>{task.order_number}</span>}
+                        {task.client_name}{task.category ? ' · ' + task.category : ''}
+                      </div>
+                    </div>
+                    <span style={{ fontSize:'10px', fontWeight:'500', padding:'2px 7px', borderRadius:'10px', background:statusBg[task.status]||'#f3f4f6', color:statusColors[task.status]||'#374151', flexShrink:0 }}>
+                      {statusLabel[task.status]||task.status}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          )}
         </div>
       )}
 
