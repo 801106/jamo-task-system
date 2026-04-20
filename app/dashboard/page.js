@@ -162,6 +162,7 @@ export default function Dashboard() {
   const [editingTask, setEditingTask] = useState(null)
   const [moveTarget, setMoveTarget] = useState('')
   const [notifStatus, setNotifStatus] = useState('default')
+  const [showTimeoutWarning, setShowTimeoutWarning] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [chatUsers, setChatUsers] = useState([])
   const [chatSelected, setChatSelected] = useState(null)
@@ -188,6 +189,11 @@ export default function Dashboard() {
       supabase.from('profiles').select('*').eq('id', user.id).single().then(({ data }) => setProfile(data))
     })
     supabase.from('profiles').select('id, full_name').then(({ data }) => setUsers(data || []))
+
+    // Auto-logout warning after 7.5 hours, logout after 8 hours
+    const warnTimer = setTimeout(() => setShowTimeoutWarning(true), 7.5 * 60 * 60 * 1000)
+    const logoutTimer = setTimeout(async () => { await supabase.auth.signOut(); router.push('/?timeout=1') }, 8 * 60 * 60 * 1000)
+    return () => { clearTimeout(warnTimer); clearTimeout(logoutTimer) }
     if ('Notification' in window) setNotifStatus(Notification.permission)
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{})
   }, [])
@@ -488,9 +494,6 @@ export default function Dashboard() {
           <div style={{fontSize:'13px',fontWeight:'500',color:'#111',marginBottom:'2px',letterSpacing:'-0.1px'}}>{profile?.full_name||user?.email?.split('@')[0]}</div>
           <div style={{fontSize:'11px',color:'#9ca3af',marginBottom:'10px'}}>{profile?.role==='admin'?t.admin:t.user}</div>
 
-          <button onClick={()=>router.push('/crm')} style={{display:'block',fontSize:'11px',color:'#6d28d9',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>
-            CRM
-          </button>
           <button onClick={()=>router.push('/messages')} style={{display:'block',fontSize:'11px',color:'#2563eb',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>
             {lang==='pl'?'Wiadomosci':'Messages'}
           </button>
@@ -504,16 +507,30 @@ export default function Dashboard() {
       {/* MAIN */}
       <div style={{flex:1,display:'flex',overflow:'hidden'}}>
       <div style={{...S.main,flex:1}}>
+        {showTimeoutWarning&&(
+          <div style={{background:'#fffbeb',borderBottom:'1px solid #fde68a',padding:'6px 24px',fontSize:'12px',color:'#92400e',display:'flex',alignItems:'center',gap:'8px'}}>
+            <span>⚠️</span>
+            <span>Sesja wygasnie za 30 minut z powodu braku aktywnosci.</span>
+            <button onClick={()=>{setShowTimeoutWarning(false);supabase.auth.getSession()}} style={{marginLeft:'auto',fontSize:'11px',padding:'3px 10px',background:'#92400e',color:'white',border:'none',borderRadius:'5px',cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}}>
+              Przedluz sesje
+            </button>
+          </div>
+        )}
         <div style={S.liveBanner}>
           <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'#16a34a',display:'inline-block'}}></span>
           {t.live}
         </div>
 
         <div style={S.topbar}>
-          <span style={{fontSize:'15px',fontWeight:'600',flex:1,letterSpacing:'-0.3px',color:'#111'}}>
+          <span style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.3px',color:'#111'}}>
             {WORKSPACES.find(w=>w.key===workspace)?.label}
             {showArchive&&<span style={{fontSize:'13px',color:'#9ca3af',fontWeight:'400',marginLeft:'8px'}}>· {t.archive}</span>}
           </span>
+          <button onClick={()=>router.push('/crm')} style={{display:'flex',alignItems:'center',gap:'6px',padding:'6px 13px',borderRadius:'8px',border:'1px solid #e9d5ff',background:'#f5f3ff',color:'#6d28d9',fontSize:'13px',fontWeight:'500',cursor:'pointer',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3h10M2 7h6M2 11h8" stroke="#6d28d9" strokeWidth="1.3" strokeLinecap="round"/></svg>
+            CRM
+          </button>
+          <span style={{flex:1}}/>
           {!showArchive&&<input value={search} onChange={e=>setSearch(e.target.value)} placeholder={t.search} style={S.searchInput} />}
           {!showArchive&&<button onClick={openNew} style={S.btnPrimary}>{t.newTask}</button>}
           <button onClick={()=>setShowChat(v=>!v)} style={{position:'relative',display:'flex',alignItems:'center',gap:'6px',padding:'7px 13px',background:showChat?'#111':'#fff',color:showChat?'white':'#374151',border:'1px solid #e8e8e6',borderRadius:'8px',cursor:'pointer',fontSize:'13px',fontWeight:'500',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
