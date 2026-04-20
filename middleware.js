@@ -1,50 +1,53 @@
 import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs'
 import { NextResponse } from 'next/server'
 
-const PUBLIC_ROUTES = ['/']
-const SESSION_TIMEOUT_HOURS = 8
-
 export async function middleware(req) {
   const res = NextResponse.next()
-  const supabase = createMiddlewareClient({ req, res })
-  const { data: { session } } = await supabase.auth.getSession()
   const path = req.nextUrl.pathname
 
-  // Allow public routes
-  if (PUBLIC_ROUTES.includes(path)) {
-    if (session) return NextResponse.redirect(new URL('/dashboard', req.url))
+  // Skip middleware for API routes and static files
+  if (path.startsWith('/api') || path.startsWith('/_next') || path === '/sw.js') {
     return res
   }
 
-  // No session - redirect to login
-  if (!session) {
-    return NextResponse.redirect(new URL('/', req.url))
-  }
+  try {
+    const supabase = createMiddlewareClient({ req, res })
+    const { data: { session } } = await supabase.auth.getSession()
 
-  // Check session age - auto logout after 8 hours of inactivity
-  const lastActivity = req.cookies.get('tf_last_activity')?.value
-  const now = Date.now()
+    // Protected routes - redirect to login if no session
+    const protectedRoutes = ['/dashboard', '/crm', '/admin', '/reports', '/account', '/messages']
+    const isProtected = protectedRoutes.some(r => path.startsWith(r))
 
-  if (lastActivity) {
-    const diff = now - parseInt(lastActivity)
-    const hours = diff / (1000 * 60 * 60)
-    if (hours > SESSION_TIMEOUT_HOURS) {
-      await supabase.auth.signOut()
-      const response = NextResponse.redirect(new URL('/?timeout=1', req.url))
-      response.cookies.delete('tf_last_activity')
-      return response
+    if (isProtected && !session) {
+      return NextResponse.redirect(new URL('/', req.url))
     }
+
+    // Check session timeout only for protected routes
+    if (isProtected && session) {
+      const lastActivity = req.cookies.get('tf_last_activity')?.value
+      const now = Date.now()
+
+      if (lastActivity) {
+        const hours = (now - parseInt(lastActivity)) / (1000 * 60 * 60)
+        if (hours > 8) {
+          await supabase.auth.signOut()
+          const response = NextResponse.redirect(new URL('/?timeout=1', req.url))
+          response.cookies.delete('tf_last_activity')
+          return response
+        }
+      }
+
+      res.cookies.set('tf_last_activity', now.toString(), {
+        httpOnly: true, secure: true, sameSite: 'lax', maxAge: 60 * 60 * 24
+      })
+    }
+
+    return res
+  } catch (e) {
+    // If middleware fails for any reason, let the request through
+    console.error('Middleware error:', e)
+    return res
   }
-
-  // Update last activity cookie
-  res.cookies.set('tf_last_activity', now.toString(), {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24
-  })
-
-  return res
 }
 
 export const config = {
