@@ -608,10 +608,7 @@ export default function Dashboard() {
         <div style={S.sidebarBottom}>
           <div style={{fontSize:'13px',fontWeight:'500',color:'#111',marginBottom:'2px',letterSpacing:'-0.1px'}}>{profile?.full_name||user?.email?.split('@')[0]}</div>
           <div style={{fontSize:'11px',color:'#9ca3af',marginBottom:'10px'}}>{profile?.role==='admin'?t.admin:t.user}</div>
-          <button onClick={enableNotifications} disabled={notifBtnStyle.disabled}
-            style={{display:'block',width:'100%',textAlign:'left',fontSize:'11px',color:notifBtnStyle.color,background:notifBtnStyle.bg,border:'1px solid #e8e8e6',borderRadius:'6px',cursor:notifBtnStyle.disabled?'default':'pointer',padding:'5px 8px',marginBottom:'8px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>
-            {notifBtnStyle.label}
-          </button>
+
           <button onClick={()=>router.push('/messages')} style={{display:'block',fontSize:'11px',color:'#2563eb',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>
             {lang==='pl'?'Wiadomosci':'Messages'}
           </button>
@@ -647,16 +644,21 @@ export default function Dashboard() {
         {!showArchive&&(
           <div style={S.statsGrid}>
             {[
-              {label:t.all, val:counts.all, color:'#111'},
-              {label:t.mine, val:counts.mine, color:'#2563eb'},
-              {label:t.urgent, val:counts.urgent, color:'#dc2626'},
-              {label:t.archive, val:counts.archive, color:'#9ca3af'},
-            ].map(s=>(
-              <div key={s.label} style={S.statCard}>
+              {label:t.all, val:counts.all, color:'#111', action:()=>{setFilter('all');setShowArchive(false)}},
+              {label:t.mine, val:counts.mine, color:'#2563eb', action:()=>{setFilter('mine');setShowArchive(false)}},
+              {label:t.urgent, val:counts.urgent, color:'#dc2626', action:()=>{setFilter('urgent');setShowArchive(false)}},
+              {label:t.archive, val:counts.archive, color:'#9ca3af', action:()=>{setShowArchive(true);setFilter('all')}},
+            ].map(s=>{
+              const filterKey = s.label===t.all?'all':s.label===t.mine?'mine':s.label===t.urgent?'urgent':'archive'
+              const isActive = filterKey==='archive' ? showArchive : (filter===filterKey && !showArchive)
+              return (
+              <div key={s.label} onClick={s.action} style={{...S.statCard, cursor:'pointer', border: isActive?'2px solid '+s.color:'1px solid #e8e8e6', transition:'all 0.15s'}}
+                onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';e.currentTarget.style.transform='translateY(-1px)'}}
+                onMouseLeave={e=>{e.currentTarget.style.boxShadow='none';e.currentTarget.style.transform='translateY(0)'}}>
                 <div style={{fontSize:'10px',color:'#9ca3af',marginBottom:'6px',fontWeight:'500',letterSpacing:'0.06em',textTransform:'uppercase'}}>{s.label}</div>
                 <div style={{fontSize:'28px',fontWeight:'600',color:s.color,letterSpacing:'-0.5px',lineHeight:'1'}}>{s.val}</div>
               </div>
-            ))}
+            )})}
           </div>
         )}
 
