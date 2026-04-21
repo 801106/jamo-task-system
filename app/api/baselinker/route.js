@@ -7,8 +7,8 @@ const BL_KEY = process.env.BASELINKER_API_KEY
 
 // Shop IDs from BaseLinker
 const SHOP_IDS = {
-  B2B: [1011515],                          // Shopify Jamo tylko
-  B2C: [715, 394, 12309, 9256, 1007968],  // eBay, Amazon, TikTok, OnBuy, WooCommerce HF
+  B2B: [1011515],                         // Shopify Jamo
+  B2C: [715, 394, 12309, 9256, 1007968], // eBay, Amazon, TikTok, OnBuy, WooCommerce HF
 }
 
 async function blCall(method, params = {}) {
@@ -26,12 +26,11 @@ async function blCall(method, params = {}) {
 
 function detectSegment(order) {
   const sourceId = parseInt(order.order_source_id)
-  if (SHOP_IDS.B2C.includes(sourceId)) return 'b2c'
   if (SHOP_IDS.B2B.includes(sourceId)) return 'b2b'
-  // Fallback - detect by name
+  if (SHOP_IDS.B2C.includes(sourceId)) return 'b2c'
   const s = (order.order_source || '').toLowerCase()
-  if (s.includes('healthy') || s.includes('woocommerce') || s.includes('woo')) return 'b2c'
-  return 'b2b'
+  if (s.includes('shopify') && s.includes('jamo')) return 'b2b'
+  return 'b2c'
 }
 
 function detectMarketplace(order) {
@@ -42,7 +41,6 @@ function detectMarketplace(order) {
   if (sourceId === 9256) return 'onbuy'
   if (sourceId === 1011515) return 'shopify'
   if (sourceId === 1007968) return 'woocommerce'
-  // Fallback
   const s = (order.order_source || '').toLowerCase()
   if (s.includes('amazon')) return 'amazon'
   if (s.includes('ebay')) return 'ebay'
@@ -68,7 +66,18 @@ export async function POST(req) {
   try {
     const body = await req.json().catch(() => ({}))
     const days_back = body.days_back || 7
+    const reset = body.reset || false
     const dateFrom = Math.floor((Date.now() - days_back * 24 * 60 * 60 * 1000) / 1000)
+
+    // Reset — usun wszystkich klientow i interakcje przed reimportem
+    if (reset) {
+      const { data: allClients } = await supabase.from('clients').select('id')
+      if (allClients && allClients.length > 0) {
+        const ids = allClients.map(c => c.id)
+        await supabase.from('client_interactions').delete().in('client_id', ids)
+        await supabase.from('clients').delete().in('id', ids)
+      }
+    }
 
     const data = await blCall('getOrders', {
       date_confirmed_from: dateFrom,
@@ -142,6 +151,7 @@ export async function POST(req) {
 
     return Response.json({
       success: true,
+      reset_performed: reset,
       orders_processed: orders.length,
       clients_created: created,
       clients_updated: updated,
