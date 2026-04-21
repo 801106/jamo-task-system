@@ -216,6 +216,7 @@ export default function ChatPanel({
             </div>
           </div>
         </div>
+      </div>
       )}
     </div>
   )
