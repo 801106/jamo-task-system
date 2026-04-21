@@ -1,11 +1,15 @@
 import { createClient } from '@supabase/supabase-js'
-
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 )
-
 const BL_KEY = process.env.BASELINKER_API_KEY
+
+// Shop IDs from BaseLinker
+const SHOP_IDS = {
+  B2B: [1011515],                          // Shopify Jamo tylko
+  B2C: [715, 394, 12309, 9256, 1007968],  // eBay, Amazon, TikTok, OnBuy, WooCommerce HF
+}
 
 async function blCall(method, params = {}) {
   const body = new URLSearchParams()
@@ -20,23 +24,44 @@ async function blCall(method, params = {}) {
   return res.json()
 }
 
-function detectMarketplace(source) {
-  if (!source) return 'other'
-  const s = source.toLowerCase()
+function detectSegment(order) {
+  const sourceId = parseInt(order.order_source_id)
+  if (SHOP_IDS.B2C.includes(sourceId)) return 'b2c'
+  if (SHOP_IDS.B2B.includes(sourceId)) return 'b2b'
+  // Fallback - detect by name
+  const s = (order.order_source || '').toLowerCase()
+  if (s.includes('healthy') || s.includes('woocommerce') || s.includes('woo')) return 'b2c'
+  return 'b2b'
+}
+
+function detectMarketplace(order) {
+  const sourceId = parseInt(order.order_source_id)
+  if (sourceId === 715) return 'ebay'
+  if (sourceId === 394) return 'amazon'
+  if (sourceId === 12309) return 'tiktok'
+  if (sourceId === 9256) return 'onbuy'
+  if (sourceId === 1011515) return 'shopify'
+  if (sourceId === 1007968) return 'woocommerce'
+  // Fallback
+  const s = (order.order_source || '').toLowerCase()
   if (s.includes('amazon')) return 'amazon'
   if (s.includes('ebay')) return 'ebay'
   if (s.includes('onbuy')) return 'onbuy'
   if (s.includes('shopify')) return 'shopify'
-  if (s.includes('woocommerce') || s.includes('woo') || s.includes('healthy')) return 'woocommerce'
-  if (s.includes('allegro')) return 'allegro'
+  if (s.includes('woocommerce') || s.includes('woo')) return 'woocommerce'
+  if (s.includes('tiktok') || s.includes('tik tok')) return 'tiktok'
   return 'other'
 }
 
-function detectWorkspace(source) {
-  if (!source) return 'jamo_healthy'
-  const s = source.toLowerCase()
-  if (s.includes('pp.pl') || s.includes('packpack') || s.includes('allegro')) return 'packpack'
-  return 'jamo_healthy'
+function detectStatus(segment, ltv) {
+  if (segment === 'b2b') return 'active'
+  if (ltv >= 500) return 'vip'
+  return 'returning'
+}
+
+function detectDefaultStatus(segment) {
+  if (segment === 'b2b') return 'lead'
+  return 'new'
 }
 
 export async function POST(req) {
@@ -61,25 +86,27 @@ export async function POST(req) {
       if (!order.email) { skipped++; continue }
 
       const email = order.email.toLowerCase().trim()
-      const marketplace = detectMarketplace(order.order_source)
-      const workspace = detectWorkspace(order.order_source)
+      const segment = detectSegment(order)
+      const marketplace = detectMarketplace(order)
       const orderValue = parseFloat(order.payment_done || order.price_brutto || 0)
       const orderDate = new Date(order.date_confirmed * 1000).toISOString().split('T')[0]
 
       const { data: existing } = await supabase
-        .from('clients').select('id, ltv, last_order_date').eq('email', email).single()
+        .from('clients').select('id, ltv, last_order_date, segment').eq('email', email).single()
 
       if (existing) {
         const newLtv = (parseFloat(existing.ltv) || 0) + orderValue
         const shouldUpdate = !existing.last_order_date || new Date(orderDate) > new Date(existing.last_order_date)
+
         await supabase.from('clients').update({
           ltv: newLtv,
           last_order_date: shouldUpdate ? orderDate : existing.last_order_date,
           last_contact_date: shouldUpdate ? orderDate : existing.last_order_date,
           marketplace,
-          status: newLtv >= 500 ? 'vip' : 'returning',
+          status: detectStatus(existing.segment || segment, newLtv),
           is_vip: newLtv >= 500,
         }).eq('id', existing.id)
+
         await supabase.from('client_interactions').insert({
           client_id: existing.id, type: 'order',
           content: `Zamowienie #${order.order_id} — ${marketplace} — £${orderValue.toFixed(2)}`,
@@ -87,14 +114,22 @@ export async function POST(req) {
         updated++
       } else {
         const contactName = order.delivery_fullname || order.invoice_fullname || email.split('@')[0]
+
         const { data: newClient } = await supabase.from('clients').insert({
           contact_name: contactName,
           company_name: order.invoice_company || null,
-          email, phone: order.delivery_phone || null,
-          segment: 'b2c', workspace, status: 'new',
-          source: marketplace, marketplace,
-          ltv: orderValue, last_order_date: orderDate, last_contact_date: orderDate,
+          email,
+          phone: order.delivery_phone || null,
+          segment,
+          workspace: 'jamo_healthy',
+          status: detectDefaultStatus(segment),
+          source: marketplace,
+          marketplace,
+          ltv: orderValue,
+          last_order_date: orderDate,
+          last_contact_date: orderDate,
         }).select().single()
+
         if (newClient) {
           await supabase.from('client_interactions').insert({
             client_id: newClient.id, type: 'order',
@@ -105,7 +140,13 @@ export async function POST(req) {
       }
     }
 
-    return Response.json({ success: true, orders_processed: orders.length, clients_created: created, clients_updated: updated, skipped })
+    return Response.json({
+      success: true,
+      orders_processed: orders.length,
+      clients_created: created,
+      clients_updated: updated,
+      skipped
+    })
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 })
   }
