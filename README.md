@@ -46,4 +46,4 @@ update profiles set role = 'admin', full_name = 'Jarosław', areas = '{"jamo_hea
 
 ## Gotowe!
 Aplikacja działa na PC, Android i iPhone przez przeglądarkę.
-Na Android/iPhone: Chrome → menu → "Dodaj do ekranu głównego" = działa jak natywna apka.
+Na Android/iPhone: Chrome → menu → "Dodaj do ekranu głównego" = działa jak natywna apka. 
