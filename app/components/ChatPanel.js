@@ -1,13 +1,11 @@
 'use client'
 import { useRef } from 'react'
-
 const avatarColors = [
   { bg:'#eff6ff', c:'#1d4ed8' },
   { bg:'#f0fdf4', c:'#16a34a' },
   { bg:'#faf5ff', c:'#7c3aed' },
   { bg:'#fff7ed', c:'#c2410c' },
 ]
-
 function getCol(i) { return avatarColors[i % 4] }
 function initials(n) { return (n || '?').split(' ').map(x => x[0]).join('').toUpperCase().substring(0, 2) }
 function fmtTime(d, lang) { return new Date(d).toLocaleTimeString(lang === 'pl' ? 'pl-PL' : 'en-GB', { hour: '2-digit', minute: '2-digit' }) }
@@ -17,7 +15,6 @@ function fileIcon(n) {
   if (n.match(/\.pdf$/i)) return 'PDF'
   return 'FILE'
 }
-
 export default function ChatPanel({
   user, lang,
   chatUsers, chatSelected, setChatSelected,
@@ -36,10 +33,8 @@ export default function ChatPanel({
     (t.product_name || '').toLowerCase().includes(chatTaskSearch.toLowerCase()) ||
     (t.order_number || '').toLowerCase().includes(chatTaskSearch.toLowerCase())
   )
-
   return (
     <div style={{ width: '320px', background: '#fff', borderLeft: '1px solid #e8e8e6', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-
       {/* Header */}
       <div style={{ padding: '12px 14px', borderBottom: '1px solid #e8e8e6', display: 'flex', alignItems: 'center', gap: '8px' }}>
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -50,7 +45,6 @@ export default function ChatPanel({
         </span>
         <button onClick={onClose} style={{ width: '22px', height: '22px', background: '#f4f4f3', border: 'none', borderRadius: '5px', cursor: 'pointer', color: '#9ca3af', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16px', lineHeight: '1' }}>×</button>
       </div>
-
       {/* User list */}
       {!chatSelected && (
         <div style={{ flex: 1, overflow: 'auto' }}>
@@ -82,18 +76,15 @@ export default function ChatPanel({
           })}
         </div>
       )}
-
       {/* Conversation */}
       {chatSelected && (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-
           {/* Conversation header */}
           <div style={{ padding: '10px 12px', borderBottom: '1px solid #e8e8e6', display: 'flex', alignItems: 'center', gap: '8px' }}>
             <button onClick={() => setChatSelected(null)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '16px', padding: '0', lineHeight: '1' }}>←</button>
             <div style={{ fontSize: '13px', fontWeight: '600', color: '#111', flex: 1 }}>{chatSelected.full_name}</div>
             <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#16a34a' }}></div>
           </div>
-
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px', background: '#fafaf9' }}>
             {chatMessages.length === 0 && (
@@ -143,7 +134,6 @@ export default function ChatPanel({
             })}
             <div ref={chatEndRef} />
           </div>
-
           {/* Input area */}
           <div style={{ padding: '10px 12px', borderTop: '1px solid #e8e8e6', background: '#fff' }}>
             {chatTaskObj && (
@@ -216,7 +206,6 @@ export default function ChatPanel({
             </div>
           </div>
         </div>
-      </div>
       )}
     </div>
   )
