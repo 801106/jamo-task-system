@@ -1,14 +1,17 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useRouter } from 'next/navigation'
+
 const ADMIN_ID = 'd53f6727-6bc7-4602-9ce0-4fc31ab3aba1'
 const F = { fontFamily:"'DM Sans',-apple-system,sans-serif" }
+
 const SEGMENTS = {
   b2b:     { label:'B2B', labelFull:'Jamo B2B', color:'#1d4ed8', bg:'#eff6ff' },
   b2c:     { label:'B2C', labelFull:'Healthy Future B2C', color:'#065f46', bg:'#ecfdf5' },
   giftbox: { label:'GiftBox', labelFull:'GiftBox / Short Run', color:'#6d28d9', bg:'#f5f3ff' },
 }
+
 const STATUSES = {
   b2b: [
     { key:'lead',     label:'Potencjalny', labelEn:'Lead',     color:'#374151', bg:'#f3f4f6' },
@@ -36,23 +39,266 @@ const STATUSES = {
     { key:'vip',        label:'VIP powracajacy',labelEn:'VIP',      color:'#92400e', bg:'#fffbeb' },
   ],
 }
+
 const SOURCES = ['google','amazon','referral','event','instagram','linkedin','ebay','onbuy','woocommerce','other']
 const MARKETPLACES = ['amazon','ebay','onbuy','woocommerce','allegro','other']
+
 function statusMeta(segment, key) {
   return STATUSES[segment]?.find(s => s.key === key) || { label: key, color:'#374151', bg:'#f3f4f6' }
 }
+
 function Pill({ segment, statusKey, lang }) {
   const m = statusMeta(segment, statusKey)
   return (
-    <span style={{ display:'inline-flex', alignItems:'center', padding:'2px 9px', borderRadius:'20px',
-      fontSize:'11px', fontWeight:'500', background:m.bg, color:m.color }}>
+    <span style={{ display:'inline-flex', alignItems:'center', padding:'2px 9px', borderRadius:'20px', fontSize:'11px', fontWeight:'500', background:m.bg, color:m.color }}>
       {lang==='pl' ? m.label : m.labelEn}
     </span>
   )
 }
-const emptyForm = { company_name:'', contact_name:'', email:'', phone:'', whatsapp:'',
+
+const emptyForm = {
+  company_name:'', contact_name:'', email:'', phone:'', whatsapp:'',
   segment:'b2b', status:'lead', source:'google', marketplace:'', notes:'',
-  assigned_to:'', ltv:'', last_order_date:'', workspace:'jamo_healthy', is_vip:false, is_problematic:false }
+  assigned_to:'', ltv:'', last_order_date:'', workspace:'jamo_healthy', is_vip:false, is_problematic:false
+}
+
+// AI Assistant Panel
+function AIAssistant({ clients, onFilterResults, lang }) {
+  const [open, setOpen] = useState(false)
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      content: lang === 'pl'
+        ? '👋 Cześć! Jestem Twoim asystentem CRM. Możesz mnie zapytać o klientów w języku naturalnym.\n\nPrzykłady:\n• "Pokaż klientów którzy nie zamawiali od 3 miesięcy"\n• "Kto ma najwyższe LTV?"\n• "Znajdź klientów z ryzykiem odejścia"\n• "Którzy klienci zamówili tylko raz?"\n• "Pokaż VIP-ów B2B"'
+        : '👋 Hi! I\'m your CRM assistant. Ask me about your customers in natural language.\n\nExamples:\n• "Show customers who haven\'t ordered in 3 months"\n• "Who has the highest LTV?"\n• "Find customers at churn risk"\n• "Which customers ordered only once?"'
+    }
+  ])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const messagesEndRef = useRef(null)
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const now = new Date()
+
+  function buildClientSummary(clients) {
+    // Build a compact summary for AI context
+    const today = new Date()
+    return clients.map(c => {
+      const daysSince = c.last_order_date
+        ? Math.floor((today - new Date(c.last_order_date)) / (1000 * 60 * 60 * 24))
+        : 999
+      const notes = c.notes || ''
+      const orderCountMatch = notes.match(/Zamówień: (\d+)/)
+      const orderCount = orderCountMatch ? parseInt(orderCountMatch[1]) : 1
+      const avgDaysMatch = notes.match(/Śr\. co (\d+) dni/)
+      const avgDays = avgDaysMatch ? parseInt(avgDaysMatch[1]) : null
+      const firstOrderMatch = notes.match(/Pierwszy: (\d{4}-\d{2}-\d{2})/)
+      const firstOrder = firstOrderMatch ? firstOrderMatch[1] : null
+
+      return {
+        id: c.id,
+        name: c.company_name || c.contact_name,
+        email: c.email,
+        segment: c.segment,
+        status: c.status,
+        ltv: c.ltv || 0,
+        days_since_last_order: daysSince,
+        order_count: orderCount,
+        avg_days_between_orders: avgDays,
+        first_order: firstOrder,
+        last_order: c.last_order_date,
+        is_vip: c.is_vip,
+        city: c.city || null,
+        phone: c.phone || null,
+      }
+    })
+  }
+
+  async function sendMessage() {
+    if (!input.trim() || loading) return
+
+    const userMsg = input.trim()
+    setInput('')
+    setMessages(prev => [...prev, { role: 'user', content: userMsg }])
+    setLoading(true)
+
+    try {
+      const clientSummary = buildClientSummary(clients)
+      const stats = {
+        total: clients.length,
+        b2b: clients.filter(c => c.segment === 'b2b').length,
+        b2c: clients.filter(c => c.segment === 'b2c').length,
+        vip: clients.filter(c => c.is_vip).length,
+        active_90d: clientSummary.filter(c => c.days_since_last_order <= 90).length,
+        at_risk_180d: clientSummary.filter(c => c.days_since_last_order > 90 && c.days_since_last_order <= 180).length,
+        churned: clientSummary.filter(c => c.days_since_last_order > 180).length,
+        one_time: clientSummary.filter(c => c.order_count === 1).length,
+        avg_ltv: Math.round(clients.reduce((a, c) => a + (c.ltv || 0), 0) / clients.length),
+      }
+
+      const systemPrompt = `Jesteś asystentem CRM dla firmy Jamo Packaging Solutions (UK). Pomagasz analizować bazę klientów i odpowiadać na pytania.
+
+DANE OGÓLNE:
+- Łącznie klientów: ${stats.total}
+- B2B (Jamo opakowania): ${stats.b2b}
+- B2C (Healthy Future - owoce liofilizowane): ${stats.b2c}
+- VIP (LTV > £500): ${stats.vip}
+- Aktywni (ostatnie 90 dni): ${stats.active_90d}
+- Ryzyko odejścia (90-180 dni): ${stats.at_risk_180d}
+- Churned (180+ dni): ${stats.churned}
+- Jednorazowi: ${stats.one_time}
+- Średnie LTV: £${stats.avg_ltv}
+
+LISTA KLIENTÓW (JSON):
+${JSON.stringify(clientSummary.slice(0, 500), null, 0)}
+
+ZADANIE:
+1. Odpowiedz na pytanie użytkownika po polsku
+2. Jeśli pytanie dotyczy konkretnych klientów - zwróć ich listę w formacie JSON na końcu odpowiedzi w bloku: <FILTER_RESULT>["id1","id2",...]</FILTER_RESULT>
+3. Bądź konkretny i pomocny
+4. Dzisiejsza data: ${now.toISOString().split('T')[0]}
+5. Jeśli pytasz o segmenty:
+   - Sample only = klienci z jednym zamówieniem i statusem 'sample' lub notes zawierające 'sample'
+   - Churned = days_since_last_order > 180
+   - At risk = days_since_last_order między 90-180
+   - Active = days_since_last_order <= 90
+   - Due to reorder = (avg_days_between_orders - days_since_last_order) <= 14`
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          system: systemPrompt,
+          messages: [
+            ...messages.filter(m => m.role !== 'assistant' || messages.indexOf(m) > 0).slice(-6),
+            { role: 'user', content: userMsg }
+          ]
+        })
+      })
+
+      const data = await response.json()
+      const aiText = data.content?.[0]?.text || 'Przepraszam, nie mogłem przetworzyć zapytania.'
+
+      // Extract filter result if present
+      const filterMatch = aiText.match(/<FILTER_RESULT>([\s\S]*?)<\/FILTER_RESULT>/)
+      let cleanText = aiText.replace(/<FILTER_RESULT>[\s\S]*?<\/FILTER_RESULT>/g, '').trim()
+
+      if (filterMatch) {
+        try {
+          const ids = JSON.parse(filterMatch[1])
+          onFilterResults(ids, userMsg)
+          cleanText += `\n\n✅ Pokazuję ${ids.length} klientów w tabeli poniżej.`
+        } catch (e) {
+          // ignore parse error
+        }
+      }
+
+      setMessages(prev => [...prev, { role: 'assistant', content: cleanText }])
+    } catch (err) {
+      setMessages(prev => [...prev, { role: 'assistant', content: `❌ Błąd: ${err.message}` }])
+    }
+
+    setLoading(false)
+  }
+
+  const suggestions = [
+    'Kto nie zamawiał od 3 miesięcy?',
+    'Pokaż VIP-ów B2B',
+    'Klienci którzy zamówili tylko raz',
+    'Kto powinien wkrótce zamówić?',
+    'Najwyższe LTV top 10',
+    'Klienci z ryzykiem odejścia',
+  ]
+
+  return (
+    <div style={{ marginBottom:'14px' }}>
+      {/* AI Toggle Button */}
+      <button onClick={() => setOpen(v => !v)}
+        style={{ display:'flex', alignItems:'center', gap:'8px', width:'100%', padding:'12px 16px', background: open ? '#111' : '#fff', border:`1px solid ${open ? '#111' : '#e8e8e6'}`, borderRadius:'10px', cursor:'pointer', ...F, transition:'all 0.2s' }}>
+        <span style={{ fontSize:'16px' }}>🤖</span>
+        <div style={{ textAlign:'left', flex:1 }}>
+          <div style={{ fontSize:'13px', fontWeight:'600', color: open ? 'white' : '#111' }}>AI Asystent CRM</div>
+          <div style={{ fontSize:'11px', color: open ? '#9ca3af' : '#6b7280' }}>Zapytaj o klientów w języku naturalnym</div>
+        </div>
+        <span style={{ fontSize:'12px', color: open ? 'white' : '#9ca3af' }}>{open ? '▲' : '▼'}</span>
+      </button>
+
+      {open && (
+        <div style={{ background:'#fff', border:'1px solid #e8e8e6', borderTop:'none', borderRadius:'0 0 10px 10px', overflow:'hidden' }}>
+          {/* Messages */}
+          <div style={{ height:'280px', overflowY:'auto', padding:'16px', display:'flex', flexDirection:'column', gap:'10px', background:'#fafaf9' }}>
+            {messages.map((msg, i) => (
+              <div key={i} style={{ display:'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                <div style={{
+                  maxWidth:'85%', padding:'10px 14px', borderRadius:'12px', fontSize:'13px', lineHeight:'1.6',
+                  background: msg.role === 'user' ? '#111' : '#fff',
+                  color: msg.role === 'user' ? 'white' : '#111',
+                  border: msg.role === 'user' ? 'none' : '1px solid #e8e8e6',
+                  whiteSpace: 'pre-wrap',
+                }}>
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div style={{ display:'flex', justifyContent:'flex-start' }}>
+                <div style={{ padding:'10px 14px', borderRadius:'12px', background:'#fff', border:'1px solid #e8e8e6', display:'flex', gap:'4px', alignItems:'center' }}>
+                  {[0,1,2].map(i => (
+                    <div key={i} style={{ width:'6px', height:'6px', borderRadius:'50%', background:'#9ca3af', animation:`bounce 1s ${i*0.2}s infinite` }}></div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Suggestions */}
+          <div style={{ padding:'8px 16px', borderTop:'1px solid #f0f0ee', display:'flex', gap:'6px', flexWrap:'wrap' }}>
+            {suggestions.map(s => (
+              <button key={s} onClick={() => { setInput(s); }}
+                style={{ padding:'4px 10px', background:'#f4f4f3', border:'1px solid #e8e8e6', borderRadius:'20px', fontSize:'11px', cursor:'pointer', color:'#374151', ...F }}
+                onMouseEnter={e => e.currentTarget.style.background = '#e8e8e6'}
+                onMouseLeave={e => e.currentTarget.style.background = '#f4f4f3'}>
+                {s}
+              </button>
+            ))}
+          </div>
+
+          {/* Input */}
+          <div style={{ padding:'12px 16px', borderTop:'1px solid #f0f0ee', display:'flex', gap:'8px' }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+              placeholder="Zapytaj o klientów... (Enter)"
+              style={{ flex:1, padding:'9px 12px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', outline:'none', ...F }}
+            />
+            <button onClick={sendMessage} disabled={loading || !input.trim()}
+              style={{ padding:'9px 16px', background: loading || !input.trim() ? '#9ca3af' : '#111', color:'white', border:'none', borderRadius:'8px', cursor: loading || !input.trim() ? 'default' : 'pointer', fontSize:'13px', fontWeight:'500', ...F }}>
+              Wyślij
+            </button>
+            <button onClick={() => { onFilterResults(null, ''); setMessages([messages[0]]) }}
+              style={{ padding:'9px 12px', background:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca', borderRadius:'8px', cursor:'pointer', fontSize:'12px', ...F }}>
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
+      <style>{`
+        @keyframes bounce {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-4px); }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 export default function CRM() {
   const router = useRouter()
   const [user, setUser] = useState(null)
@@ -65,6 +311,8 @@ export default function CRM() {
   const [segFilter, setSegFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [search, setSearch] = useState('')
+  const [aiFilterIds, setAiFilterIds] = useState(null)
+  const [aiFilterLabel, setAiFilterLabel] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
   const [editingClient, setEditingClient] = useState(null)
@@ -85,6 +333,7 @@ export default function CRM() {
   const [resetConfirmText, setResetConfirmText] = useState('')
   const [resetting, setResetting] = useState(false)
   const isAdmin = user?.id === ADMIN_ID
+
   useEffect(() => {
     const saved = localStorage.getItem('tf_lang'); if (saved) setLang(saved)
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -94,6 +343,7 @@ export default function CRM() {
     })
     supabase.from('profiles').select('id, full_name').then(({ data }) => setUsers(data || []))
   }, [])
+
   const loadClients = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase.from('clients')
@@ -103,7 +353,9 @@ export default function CRM() {
     setClients(data || [])
     setLoading(false)
   }, [])
+
   useEffect(() => { loadClients() }, [loadClients])
+
   async function loadInteractions(clientId) {
     const { data } = await supabase.from('client_interactions')
       .select('*, author:profiles!created_by(full_name)')
@@ -111,6 +363,7 @@ export default function CRM() {
       .order('created_at', { ascending: false })
     setInteractions(data || [])
   }
+
   async function openDetail(client) {
     setSelectedClient(client)
     setShowDetail(true)
@@ -118,6 +371,7 @@ export default function CRM() {
     await loadInteractions(client.id)
     await loadClientTasks(client.id)
   }
+
   async function loadClientTasks(clientId) {
     const { data } = await supabase.from('tasks')
       .select('*')
@@ -125,15 +379,18 @@ export default function CRM() {
       .order('created_at', { ascending: false })
     setClientTasks(data || [])
   }
+
   async function createTaskForClient() {
     if (!selectedClient) return
     router.push('/dashboard?client_id=' + selectedClient.id + '&client_name=' + encodeURIComponent(selectedClient.company_name || selectedClient.contact_name))
   }
+
   function openNew() {
     setEditingClient(null)
     setForm({ ...emptyForm, assigned_to: user?.id || '' })
     setShowModal(true)
   }
+
   function openEdit(client) {
     setEditingClient(client)
     setForm({
@@ -156,6 +413,7 @@ export default function CRM() {
     })
     setShowModal(true)
   }
+
   async function handleSave() {
     if (!form.contact_name.trim()) return
     setSaving(true)
@@ -178,12 +436,14 @@ export default function CRM() {
     setShowModal(false)
     loadClients()
   }
+
   async function handleDelete(id) {
-    if (!confirm(lang==='pl' ? 'Usunac tego klienta? Tej operacji nie mozna cofnac.' : 'Delete this client? This cannot be undone.')) return
+    if (!confirm(lang === 'pl' ? 'Usunac tego klienta? Tej operacji nie mozna cofnac.' : 'Delete this client? This cannot be undone.')) return
     await supabase.from('clients').delete().eq('id', id)
     setShowDetail(false)
     loadClients()
   }
+
   async function addNote() {
     if (!newNote.trim() || !selectedClient) return
     setSavingNote(true)
@@ -194,11 +454,13 @@ export default function CRM() {
     loadClients()
     setSavingNote(false)
   }
+
   async function changeStatus(clientId, status) {
     await supabase.from('clients').update({ status }).eq('id', clientId)
     loadClients()
     if (selectedClient?.id === clientId) setSelectedClient(prev => ({ ...prev, status }))
   }
+
   async function syncBaseLinker() {
     setBlSyncing(true)
     setBlResult(null)
@@ -216,6 +478,7 @@ export default function CRM() {
     }
     setBlSyncing(false)
   }
+
   async function resetAndSync() {
     if (resetConfirmText !== 'RESET') return
     setResetting(true)
@@ -236,6 +499,7 @@ export default function CRM() {
     }
     setResetting(false)
   }
+
   async function autoFlagInactive() {
     const toFlag = clients.filter(c => c.segment === 'b2b' && c.status === 'active' && daysSince(c.last_contact_date) >= 90)
     for (const c of toFlag) {
@@ -243,26 +507,42 @@ export default function CRM() {
     }
     if (toFlag.length > 0) loadClients()
   }
+
+  function handleAIFilter(ids, label) {
+    setAiFilterIds(ids)
+    setAiFilterLabel(label)
+    if (ids) {
+      setSegFilter('all')
+      setStatusFilter('all')
+      setSearch('')
+    }
+  }
+
+  const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d).getTime()) / (1000 * 60 * 60 * 24)) : null
+
   const filtered = clients.filter(c => {
+    if (aiFilterIds) return aiFilterIds.includes(c.id)
     if (segFilter !== 'all' && c.segment !== segFilter) return false
     if (statusFilter !== 'all' && c.status !== statusFilter) return false
     if (search) {
       const q = search.toLowerCase()
-      return (c.company_name||'').toLowerCase().includes(q) ||
-             (c.contact_name||'').toLowerCase().includes(q) ||
-             (c.email||'').toLowerCase().includes(q)
+      return (c.company_name || '').toLowerCase().includes(q) ||
+        (c.contact_name || '').toLowerCase().includes(q) ||
+        (c.email || '').toLowerCase().includes(q)
     }
     return true
   })
+
   const counts = {
     all: clients.length,
-    b2b: clients.filter(c => c.segment==='b2b').length,
-    b2c: clients.filter(c => c.segment==='b2c').length,
-    giftbox: clients.filter(c => c.segment==='giftbox').length,
+    b2b: clients.filter(c => c.segment === 'b2b').length,
+    b2c: clients.filter(c => c.segment === 'b2c').length,
+    giftbox: clients.filter(c => c.segment === 'giftbox').length,
     vip: clients.filter(c => c.is_vip).length,
   }
-  const fmtDate = (d) => d ? new Date(d).toLocaleDateString(lang==='pl'?'pl-PL':'en-GB') : '—'
-  const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d).getTime()) / (1000*60*60*24)) : null
+
+  const fmtDate = (d) => d ? new Date(d).toLocaleDateString(lang === 'pl' ? 'pl-PL' : 'en-GB') : '—'
+
   const alerts = clients.filter(c => {
     if (c.segment !== 'b2b' && c.segment !== 'giftbox') return false
     if (c.status === 'lost' || c.status === 'done') return false
@@ -283,204 +563,226 @@ export default function CRM() {
       lead: `Nowy lead bez kontaktu od ${days} dni`,
     }
     return { client: c, message: messages[c.status] || `Brak kontaktu od ${days} dni`, days, urgent: days >= 90 || (c.status === 'quote' && days >= 14) }
-  }).sort((a,b) => b.days - a.days)
-  const fmtDT = (d) => d ? new Date(d).toLocaleString(lang==='pl'?'pl-PL':'en-GB', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''
-  const initials = (n) => (n||'?').split(' ').map(x=>x[0]).join('').toUpperCase().substring(0,2)
-  const interactionIcon = { note:'📝', call:'📞', email:'✉️', meeting:'🤝', order:'📦', complaint:'⚠️', quote:'💰' }
+  }).sort((a, b) => b.days - a.days)
+
+  const fmtDT = (d) => d ? new Date(d).toLocaleString(lang === 'pl' ? 'pl-PL' : 'en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
+  const initials = (n) => (n || '?').split(' ').map(x => x[0]).join('').toUpperCase().substring(0, 2)
+  const interactionIcon = { note: '📝', call: '📞', email: '✉️', meeting: '🤝', order: '📦', complaint: '⚠️', quote: '💰' }
+
   const S = {
-    page: { display:'flex', height:'100vh', ...F, fontSize:'14px', background:'#f5f5f3' },
-    topbar: { background:'#fff', borderBottom:'1px solid #e8e8e6', padding:'0 24px', height:'56px', display:'flex', alignItems:'center', gap:'12px', flexShrink:0 },
-    content: { flex:1, overflow:'auto', padding:'20px 24px' },
-    card: { background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', overflow:'hidden' },
-    th: { fontSize:'10px', color:'#9ca3af', fontWeight:'500', textTransform:'uppercase', letterSpacing:'0.06em' },
-    input: { width:'100%', padding:'8px 11px', border:'1px solid #e8e8e6', borderRadius:'7px', fontSize:'13px', outline:'none', ...F, color:'#111', background:'#fff' },
-    select: { width:'100%', padding:'8px 11px', border:'1px solid #e8e8e6', borderRadius:'7px', fontSize:'13px', outline:'none', ...F, color:'#111', background:'#fff' },
-    btnPrimary: { background:'#111', color:'white', border:'none', borderRadius:'8px', padding:'8px 16px', fontSize:'13px', fontWeight:'500', cursor:'pointer', ...F },
-    btnSm: (v) => ({ padding:'4px 9px', fontSize:'11px', borderRadius:'6px', cursor:'pointer', ...F, fontWeight:'500', border: v==='red'?'1px solid #fecaca': v==='green'?'1px solid #bbf7d0': v==='blue'?'1px solid #bfdbfe':'1px solid #e8e8e6', background: v==='red'?'#fef2f2': v==='green'?'#f0fdf4': v==='blue'?'#eff6ff':'#fff', color: v==='red'?'#dc2626': v==='green'?'#16a34a': v==='blue'?'#1d4ed8':'#374151' }),
-    overlay: { position:'fixed', inset:0, background:'rgba(0,0,0,0.35)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50 },
-    modal: (w) => ({ background:'#fff', borderRadius:'14px', width:w||'520px', maxWidth:'95vw', maxHeight:'90vh', overflowY:'auto', border:'1px solid #e8e8e6' }),
-    label: { display:'block', fontSize:'12px', fontWeight:'500', marginBottom:'4px', color:'#374151' },
-    grid2: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'12px' },
+    page: { display: 'flex', height: '100vh', ...F, fontSize: '14px', background: '#f5f5f3' },
+    topbar: { background: '#fff', borderBottom: '1px solid #e8e8e6', padding: '0 24px', height: '56px', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 },
+    content: { flex: 1, overflow: 'auto', padding: '20px 24px' },
+    card: { background: '#fff', border: '1px solid #e8e8e6', borderRadius: '10px', overflow: 'hidden' },
+    th: { fontSize: '10px', color: '#9ca3af', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.06em' },
+    input: { width: '100%', padding: '8px 11px', border: '1px solid #e8e8e6', borderRadius: '7px', fontSize: '13px', outline: 'none', ...F, color: '#111', background: '#fff' },
+    select: { width: '100%', padding: '8px 11px', border: '1px solid #e8e8e6', borderRadius: '7px', fontSize: '13px', outline: 'none', ...F, color: '#111', background: '#fff' },
+    btnPrimary: { background: '#111', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 16px', fontSize: '13px', fontWeight: '500', cursor: 'pointer', ...F },
+    btnSm: (v) => ({ padding: '4px 9px', fontSize: '11px', borderRadius: '6px', cursor: 'pointer', ...F, fontWeight: '500', border: v === 'red' ? '1px solid #fecaca' : v === 'green' ? '1px solid #bbf7d0' : v === 'blue' ? '1px solid #bfdbfe' : '1px solid #e8e8e6', background: v === 'red' ? '#fef2f2' : v === 'green' ? '#f0fdf4' : v === 'blue' ? '#eff6ff' : '#fff', color: v === 'red' ? '#dc2626' : v === 'green' ? '#16a34a' : v === 'blue' ? '#1d4ed8' : '#374151' }),
+    overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 },
+    modal: (w) => ({ background: '#fff', borderRadius: '14px', width: w || '520px', maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto', border: '1px solid #e8e8e6' }),
+    label: { display: 'block', fontSize: '12px', fontWeight: '500', marginBottom: '4px', color: '#374151' },
+    grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' },
   }
+
   return (
     <div style={S.page}>
-      <div style={{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
+        {/* TOPBAR */}
         <div style={S.topbar}>
-          <button onClick={() => router.push('/dashboard')} style={{ border:'none', background:'none', cursor:'pointer', color:'#9ca3af', fontSize:'20px', lineHeight:'1', padding:'0' }}>←</button>
-          <span style={{ fontSize:'15px', fontWeight:'600', letterSpacing:'-0.3px', color:'#111', flex:1 }}>CRM</span>
-          <div style={{ display:'flex', gap:'6px' }}>
+          <button onClick={() => router.push('/dashboard')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '20px', lineHeight: '1', padding: '0' }}>←</button>
+          <span style={{ fontSize: '15px', fontWeight: '600', letterSpacing: '-0.3px', color: '#111', flex: 1 }}>CRM</span>
+          <div style={{ display: 'flex', gap: '6px' }}>
             {Object.entries(SEGMENTS).map(([k, v]) => (
-              <button key={k} onClick={() => { setSegFilter(k); setStatusFilter('all') }}
-                style={{ padding:'5px 12px', borderRadius:'7px', fontSize:'12px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor: segFilter===k ? v.color : '#e8e8e6', background: segFilter===k ? v.bg : '#fff', color: segFilter===k ? v.color : '#6b7280', ...F }}>
-                {v.label} <span style={{ marginLeft:'4px', fontWeight:'600' }}>{counts[k]}</span>
+              <button key={k} onClick={() => { setSegFilter(k); setStatusFilter('all'); setAiFilterIds(null) }}
+                style={{ padding: '5px 12px', borderRadius: '7px', fontSize: '12px', fontWeight: '500', cursor: 'pointer', border: '1px solid', borderColor: segFilter === k && !aiFilterIds ? v.color : '#e8e8e6', background: segFilter === k && !aiFilterIds ? v.bg : '#fff', color: segFilter === k && !aiFilterIds ? v.color : '#6b7280', ...F }}>
+                {v.label} <span style={{ marginLeft: '4px', fontWeight: '600' }}>{counts[k]}</span>
               </button>
             ))}
-            <button onClick={() => setSegFilter('all')}
-              style={{ padding:'5px 12px', borderRadius:'7px', fontSize:'12px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor: segFilter==='all'?'#111':'#e8e8e6', background: segFilter==='all'?'#111':'#fff', color: segFilter==='all'?'white':'#6b7280', ...F }}>
-              Wszyscy <span style={{ marginLeft:'4px' }}>{counts.all}</span>
+            <button onClick={() => { setSegFilter('all'); setAiFilterIds(null) }}
+              style={{ padding: '5px 12px', borderRadius: '7px', fontSize: '12px', fontWeight: '500', cursor: 'pointer', border: '1px solid', borderColor: segFilter === 'all' && !aiFilterIds ? '#111' : '#e8e8e6', background: segFilter === 'all' && !aiFilterIds ? '#111' : '#fff', color: segFilter === 'all' && !aiFilterIds ? 'white' : '#6b7280', ...F }}>
+              Wszyscy <span style={{ marginLeft: '4px' }}>{counts.all}</span>
             </button>
           </div>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Szukaj klienta..." style={{ ...S.input, width:'200px' }} />
-          <div style={{ display:'flex', border:'1px solid #e8e8e6', borderRadius:'8px', overflow:'hidden', flexShrink:0 }}>
-            {[{key:'list',icon:'☰'},{key:'kanban',icon:'⊞'}].map(v => (
+          <input value={search} onChange={e => { setSearch(e.target.value); setAiFilterIds(null) }} placeholder="Szukaj klienta..." style={{ ...S.input, width: '200px' }} />
+          <div style={{ display: 'flex', border: '1px solid #e8e8e6', borderRadius: '8px', overflow: 'hidden', flexShrink: 0 }}>
+            {[{ key: 'list', icon: '☰' }, { key: 'kanban', icon: '⊞' }].map(v => (
               <button key={v.key} onClick={() => setViewMode(v.key)}
-                style={{ padding:'7px 11px', border:'none', background: viewMode===v.key?'#111':'#fff', color: viewMode===v.key?'white':'#6b7280', cursor:'pointer', fontSize:'13px', fontFamily:"'DM Sans',sans-serif" }}>
+                style={{ padding: '7px 11px', border: 'none', background: viewMode === v.key ? '#111' : '#fff', color: viewMode === v.key ? 'white' : '#6b7280', cursor: 'pointer', fontSize: '13px', fontFamily: "'DM Sans',sans-serif" }}>
                 {v.icon}
               </button>
             ))}
           </div>
           <button onClick={openNew} style={S.btnPrimary}>+ Nowy klient</button>
         </div>
+
         <div style={S.content}>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'10px', marginBottom:'20px' }}>
+          {/* STATS */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '10px', marginBottom: '20px' }}>
             {[
-              { label:'Wszyscy klienci', val:counts.all, color:'#111' },
-              { label:'Jamo B2B', val:counts.b2b, color:'#1d4ed8' },
-              { label:'Healthy Future', val:counts.b2c, color:'#065f46' },
-              { label:'GiftBox', val:counts.giftbox, color:'#6d28d9' },
-              { label:'VIP', val:counts.vip, color:'#92400e' },
+              { label: 'Wszyscy klienci', val: counts.all, color: '#111' },
+              { label: 'Jamo B2B', val: counts.b2b, color: '#1d4ed8' },
+              { label: 'Healthy Future', val: counts.b2c, color: '#065f46' },
+              { label: 'GiftBox', val: counts.giftbox, color: '#6d28d9' },
+              { label: 'VIP', val: counts.vip, color: '#92400e' },
             ].map(s => (
-              <div key={s.label} style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', padding:'14px 16px' }}>
-                <div style={{ fontSize:'10px', color:'#9ca3af', fontWeight:'500', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'6px' }}>{s.label}</div>
-                <div style={{ fontSize:'26px', fontWeight:'600', color:s.color, letterSpacing:'-0.5px' }}>{s.val}</div>
+              <div key={s.label} style={{ background: '#fff', border: '1px solid #e8e8e6', borderRadius: '10px', padding: '14px 16px' }}>
+                <div style={{ fontSize: '10px', color: '#9ca3af', fontWeight: '500', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px' }}>{s.label}</div>
+                <div style={{ fontSize: '26px', fontWeight: '600', color: s.color, letterSpacing: '-0.5px' }}>{s.val}</div>
               </div>
             ))}
           </div>
-          {alerts.length > 0 && showAlerts && (
-            <div style={{ background:'#fff', border:'1px solid #fde68a', borderRadius:'10px', marginBottom:'14px', overflow:'hidden' }}>
-              <div style={{ padding:'10px 14px', background:'#fffbeb', borderBottom:'1px solid #fde68a', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:'7px' }}>
-                  <span style={{ fontSize:'14px' }}>⚠️</span>
-                  <span style={{ fontSize:'13px', fontWeight:'600', color:'#92400e' }}>
-                    {alerts.length} {lang==='pl' ? 'klientow wymaga uwagi' : 'clients need attention'}
+
+          {/* AI ASSISTANT */}
+          <AIAssistant clients={clients} onFilterResults={handleAIFilter} lang={lang} />
+
+          {/* AI Filter Active Banner */}
+          {aiFilterIds && (
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '14px' }}>🤖</span>
+              <span style={{ fontSize: '13px', color: '#1d4ed8', fontWeight: '500', flex: 1 }}>
+                AI filtr aktywny — pokazuję {filtered.length} klientów
+              </span>
+              <button onClick={() => { setAiFilterIds(null); setAiFilterLabel('') }}
+                style={{ fontSize: '11px', padding: '3px 10px', background: '#1d4ed8', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', ...F }}>
+                Resetuj filtr
+              </button>
+            </div>
+          )}
+
+          {/* ALERTS PANEL */}
+          {alerts.length > 0 && showAlerts && !aiFilterIds && (
+            <div style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: '10px', marginBottom: '14px', overflow: 'hidden' }}>
+              <div style={{ padding: '10px 14px', background: '#fffbeb', borderBottom: '1px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                  <span style={{ fontSize: '14px' }}>⚠️</span>
+                  <span style={{ fontSize: '13px', fontWeight: '600', color: '#92400e' }}>
+                    {alerts.length} klientow wymaga uwagi
                   </span>
                 </div>
-                <div style={{ display:'flex', gap:'8px', alignItems:'center' }}>
-                  <button onClick={autoFlagInactive} style={{ fontSize:'11px', padding:'3px 10px', background:'#92400e', color:'white', border:'none', borderRadius:'5px', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button onClick={autoFlagInactive} style={{ fontSize: '11px', padding: '3px 10px', background: '#92400e', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
                     Auto-oznacz nieaktywnych
                   </button>
-                  <button onClick={() => setShowAlerts(false)} style={{ fontSize:'16px', background:'none', border:'none', cursor:'pointer', color:'#9ca3af', lineHeight:'1' }}>×</button>
+                  <button onClick={() => setShowAlerts(false)} style={{ fontSize: '16px', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', lineHeight: '1' }}>×</button>
                 </div>
               </div>
-              <div style={{ maxHeight:'200px', overflowY:'auto' }}>
-                {alerts.slice(0,8).map(({ client: c, message, urgent }) => (
+              <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                {alerts.slice(0, 8).map(({ client: c, message, urgent }) => (
                   <div key={c.id} onClick={() => openDetail(c)}
-                    style={{ display:'flex', alignItems:'center', gap:'10px', padding:'9px 14px', borderBottom:'1px solid #fef9c3', cursor:'pointer', background: urgent ? '#fef2f2' : '#fff' }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 14px', borderBottom: '1px solid #fef9c3', cursor: 'pointer', background: urgent ? '#fef2f2' : '#fff' }}
                     onMouseEnter={e => e.currentTarget.style.background = urgent ? '#fee2e2' : '#fefce8'}
                     onMouseLeave={e => e.currentTarget.style.background = urgent ? '#fef2f2' : '#fff'}>
-                    <div style={{ width:'28px', height:'28px', borderRadius:'50%', background: urgent ? '#fef2f2' : '#fffbeb', color: urgent ? '#dc2626' : '#92400e', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:'600', flexShrink:0 }}>
-                      {(c.company_name||c.contact_name||'?').substring(0,2).toUpperCase()}
+                    <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: urgent ? '#fef2f2' : '#fffbeb', color: urgent ? '#dc2626' : '#92400e', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', fontWeight: '600', flexShrink: 0 }}>
+                      {(c.company_name || c.contact_name || '?').substring(0, 2).toUpperCase()}
                     </div>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:'12px', fontWeight:'500', color:'#111' }}>{c.company_name || c.contact_name}</div>
-                      <div style={{ fontSize:'11px', color: urgent ? '#dc2626' : '#92400e' }}>{message}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '12px', fontWeight: '500', color: '#111' }}>{c.company_name || c.contact_name}</div>
+                      <div style={{ fontSize: '11px', color: urgent ? '#dc2626' : '#92400e' }}>{message}</div>
                     </div>
-                    <span style={{ fontSize:'10px', fontWeight:'500', padding:'2px 7px', borderRadius:'10px', background: urgent?'#fef2f2':'#fffbeb', color: urgent?'#dc2626':'#92400e', flexShrink:0 }}>
-                      {(() => { const m = (STATUSES[c.segment]||[]).find(s=>s.key===c.status); return m ? (lang==='pl'?m.label:m.labelEn) : c.status })()}
+                    <span style={{ fontSize: '10px', fontWeight: '500', padding: '2px 7px', borderRadius: '10px', background: urgent ? '#fef2f2' : '#fffbeb', color: urgent ? '#dc2626' : '#92400e', flexShrink: 0 }}>
+                      {(() => { const m = (STATUSES[c.segment] || []).find(s => s.key === c.status); return m ? m.label : c.status })()}
                     </span>
                   </div>
                 ))}
               </div>
             </div>
           )}
-          <div style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', padding:'12px 16px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
-              <div style={{ width:'28px', height:'28px', background:'#f0f4ff', borderRadius:'7px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px' }}>🔗</div>
+
+          {/* BASELINKER SYNC PANEL */}
+          <div style={{ background: '#fff', border: '1px solid #e8e8e6', borderRadius: '10px', padding: '12px 16px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ width: '28px', height: '28px', background: '#f0f4ff', borderRadius: '7px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px' }}>🔗</div>
               <div>
-                <div style={{ fontSize:'13px', fontWeight:'600', color:'#111' }}>BaseLinker Sync</div>
-                <div style={{ fontSize:'11px', color:'#9ca3af' }}>Auto-import raz dziennie — Amazon, eBay, OnBuy, WooCommerce, Shopify</div>
+                <div style={{ fontSize: '13px', fontWeight: '600', color: '#111' }}>BaseLinker Sync</div>
+                <div style={{ fontSize: '11px', color: '#9ca3af' }}>Auto-import raz dziennie</div>
               </div>
             </div>
-            <div style={{ display:'flex', alignItems:'center', gap:'8px', marginLeft:'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
               <select value={blDays} onChange={e => setBlDays(Number(e.target.value))}
-                style={{ padding:'6px 10px', border:'1px solid #e8e8e6', borderRadius:'7px', fontSize:'12px', outline:'none', fontFamily:"'DM Sans',sans-serif" }}>
+                style={{ padding: '6px 10px', border: '1px solid #e8e8e6', borderRadius: '7px', fontSize: '12px', outline: 'none', fontFamily: "'DM Sans',sans-serif" }}>
                 <option value={7}>Ostatnie 7 dni</option>
                 <option value={30}>Ostatnie 30 dni</option>
                 <option value={90}>Ostatnie 90 dni</option>
                 <option value={365}>Ostatni rok</option>
               </select>
               <button onClick={syncBaseLinker} disabled={blSyncing || resetting}
-                style={{ display:'flex', alignItems:'center', gap:'6px', padding:'7px 14px', background: blSyncing?'#6b7280':'#111', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'500', cursor: blSyncing?'default':'pointer', fontFamily:"'DM Sans',sans-serif" }}>
-                {blSyncing ? (
-                  <><div style={{ width:'12px', height:'12px', border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'white', borderRadius:'50%', animation:'spin 0.8s linear infinite' }}></div> Synchronizuje...</>
-                ) : resetting ? (
-                  <><div style={{ width:'12px', height:'12px', border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'white', borderRadius:'50%', animation:'spin 0.8s linear infinite' }}></div> Resetuje...</>
-                ) : (
-                  <>↻ Synchronizuj</>
-                )}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', background: blSyncing ? '#6b7280' : '#111', color: 'white', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '500', cursor: blSyncing ? 'default' : 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
+                {blSyncing ? <><div style={{ width: '12px', height: '12px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }}></div> Synchronizuje...</> : <>↻ Synchronizuj</>}
               </button>
               {isAdmin && (
                 <button onClick={() => setShowResetModal(true)} disabled={blSyncing || resetting}
-                  style={{ padding:'7px 12px', background:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca', borderRadius:'8px', fontSize:'12px', fontWeight:'500', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>
+                  style={{ padding: '7px 12px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '8px', fontSize: '12px', fontWeight: '500', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
                   🗑 Reset + Import
                 </button>
               )}
             </div>
             {blResult && (
-              <div style={{ width:'100%', padding:'8px 12px', borderRadius:'7px', background: blResult.error ? '#fef2f2' : '#f0fdf4', border: `1px solid ${blResult.error ? '#fecaca' : '#bbf7d0'}`, fontSize:'12px', color: blResult.error ? '#dc2626' : '#065f46' }}>
-                {blResult.error
-                  ? `Blad: ${blResult.error}`
-                  : `${blResult.reset_performed ? '🗑 Reset wykonany. ' : ''}✅ Zsynchronizowano ${blResult.orders_processed} zamowien — ${blResult.clients_created} nowych klientow, ${blResult.clients_updated} zaktualizowanych`
-                }
+              <div style={{ width: '100%', padding: '8px 12px', borderRadius: '7px', background: blResult.error ? '#fef2f2' : '#f0fdf4', border: `1px solid ${blResult.error ? '#fecaca' : '#bbf7d0'}`, fontSize: '12px', color: blResult.error ? '#dc2626' : '#065f46' }}>
+                {blResult.error ? `Blad: ${blResult.error}` : `${blResult.reset_performed ? '🗑 Reset wykonany. ' : ''}✅ Zsynchronizowano ${blResult.orders_processed} zamowien — ${blResult.clients_created} nowych, ${blResult.clients_updated} zaktualizowanych`}
               </div>
             )}
           </div>
           <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-          {segFilter !== 'all' && (
-            <div style={{ display:'flex', gap:'6px', marginBottom:'14px', flexWrap:'wrap' }}>
-              <button onClick={() => setStatusFilter('all')} style={{ ...S.btnSm(statusFilter==='all'?'blue':''), fontSize:'12px', padding:'5px 12px' }}>Wszystkie statusy</button>
-              {(STATUSES[segFilter]||[]).map(s => (
+
+          {/* STATUS FILTER BAR */}
+          {segFilter !== 'all' && !aiFilterIds && (
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
+              <button onClick={() => setStatusFilter('all')} style={{ ...S.btnSm(statusFilter === 'all' ? 'blue' : ''), fontSize: '12px', padding: '5px 12px' }}>Wszystkie statusy</button>
+              {(STATUSES[segFilter] || []).map(s => (
                 <button key={s.key} onClick={() => setStatusFilter(s.key)}
-                  style={{ padding:'5px 12px', borderRadius:'20px', fontSize:'11px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor: statusFilter===s.key ? s.color : '#e8e8e6', background: statusFilter===s.key ? s.bg : '#fff', color: statusFilter===s.key ? s.color : '#6b7280', ...F }}>
-                  {lang==='pl' ? s.label : s.labelEn}
-                  <span style={{ marginLeft:'5px', fontWeight:'600' }}>{clients.filter(c=>c.segment===segFilter&&c.status===s.key).length}</span>
+                  style={{ padding: '5px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '500', cursor: 'pointer', border: '1px solid', borderColor: statusFilter === s.key ? s.color : '#e8e8e6', background: statusFilter === s.key ? s.bg : '#fff', color: statusFilter === s.key ? s.color : '#6b7280', ...F }}>
+                  {s.label}
+                  <span style={{ marginLeft: '5px', fontWeight: '600' }}>{clients.filter(c => c.segment === segFilter && c.status === s.key).length}</span>
                 </button>
               ))}
             </div>
           )}
+
+          {/* TABLE */}
           <div style={S.card}>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 120px 90px 80px 120px', padding:'10px 16px', borderBottom:'1px solid #e8e8e6', background:'#fafaf9' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 110px 120px 90px 80px 120px', padding: '10px 16px', borderBottom: '1px solid #e8e8e6', background: '#fafaf9' }}>
               {['Klient', 'Segment', 'Status', 'Przypisany', 'LTV', 'Ost. kontakt', 'Akcje'].map(h => (
                 <span key={h} style={S.th}>{h}</span>
               ))}
             </div>
-            {loading && <div style={{ padding:'40px', textAlign:'center', color:'#9ca3af' }}>Ladowanie...</div>}
+            {loading && <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>Ladowanie...</div>}
             {!loading && filtered.length === 0 && (
-              <div style={{ padding:'40px', textAlign:'center', color:'#9ca3af', fontSize:'13px' }}>
-                {clients.length === 0 ? 'Brak klientow — dodaj pierwszego!' : 'Brak wynikow dla wybranych filtrow'}
+              <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af', fontSize: '13px' }}>
+                {clients.length === 0 ? 'Brak klientow — dodaj pierwszego!' : 'Brak wynikow'}
               </div>
             )}
             {filtered.map((client, i) => {
               const seg = SEGMENTS[client.segment]
-              const baseBg = i%2===0 ? '#fff' : '#f7f7f5'
+              const baseBg = i % 2 === 0 ? '#fff' : '#f7f7f5'
               return (
                 <div key={client.id} onClick={() => openDetail(client)}
-                  style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 120px 90px 80px 120px', padding:'12px 16px', borderBottom:'1px solid #f0f0ee', cursor:'pointer', background:baseBg, alignItems:'center' }}
-                  onMouseEnter={e => e.currentTarget.style.background='#eef2ff'}
-                  onMouseLeave={e => e.currentTarget.style.background=baseBg}>
+                  style={{ display: 'grid', gridTemplateColumns: '1fr 80px 110px 120px 90px 80px 120px', padding: '12px 16px', borderBottom: '1px solid #f0f0ee', cursor: 'pointer', background: baseBg, alignItems: 'center' }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#eef2ff'}
+                  onMouseLeave={e => e.currentTarget.style.background = baseBg}>
                   <div>
-                    <div style={{ fontSize:'13px', fontWeight:'500', color:'#111' }}>{client.company_name || client.contact_name}</div>
-                    <div style={{ fontSize:'11px', color:'#9ca3af', marginTop:'1px' }}>
+                    <div style={{ fontSize: '13px', fontWeight: '500', color: '#111' }}>{client.company_name || client.contact_name}</div>
+                    <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '1px' }}>
                       {client.company_name ? client.contact_name : ''}{client.email ? ' · ' + client.email : ''}
                     </div>
-                    {client.is_vip && <span style={{ fontSize:'10px', background:'#fffbeb', color:'#92400e', border:'1px solid #fde68a', borderRadius:'4px', padding:'1px 5px', marginTop:'2px', display:'inline-block' }}>⭐ VIP</span>}
-                    {client.is_problematic && <span style={{ fontSize:'10px', background:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca', borderRadius:'4px', padding:'1px 5px', marginTop:'2px', display:'inline-block', marginLeft:'4px' }}>⚠️</span>}
+                    {client.is_vip && <span style={{ fontSize: '10px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', borderRadius: '4px', padding: '1px 5px', marginTop: '2px', display: 'inline-block' }}>⭐ VIP</span>}
+                    {client.is_problematic && <span style={{ fontSize: '10px', background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', borderRadius: '4px', padding: '1px 5px', marginTop: '2px', display: 'inline-block', marginLeft: '4px' }}>⚠️</span>}
                   </div>
                   <div>
-                    <span style={{ fontSize:'11px', fontWeight:'500', padding:'2px 7px', borderRadius:'5px', background:seg?.bg, color:seg?.color }}>{seg?.label}</span>
+                    <span style={{ fontSize: '11px', fontWeight: '500', padding: '2px 7px', borderRadius: '5px', background: seg?.bg, color: seg?.color }}>{seg?.label}</span>
                   </div>
                   <div onClick={e => e.stopPropagation()}>
                     <select value={client.status} onChange={e => { e.stopPropagation(); changeStatus(client.id, e.target.value) }}
-                      style={{ ...S.select, padding:'3px 6px', fontSize:'11px', width:'auto', background:statusMeta(client.segment,client.status).bg, color:statusMeta(client.segment,client.status).color, border:'1px solid '+statusMeta(client.segment,client.status).color+'40', borderRadius:'20px', appearance:'none', cursor:'pointer', fontWeight:'500' }}>
-                      {(STATUSES[client.segment]||[]).map(s => <option key={s.key} value={s.key}>{lang==='pl'?s.label:s.labelEn}</option>)}
+                      style={{ ...S.select, padding: '3px 6px', fontSize: '11px', width: 'auto', background: statusMeta(client.segment, client.status).bg, color: statusMeta(client.segment, client.status).color, border: '1px solid ' + statusMeta(client.segment, client.status).color + '40', borderRadius: '20px', appearance: 'none', cursor: 'pointer', fontWeight: '500' }}>
+                      {(STATUSES[client.segment] || []).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
                   </div>
-                  <div style={{ fontSize:'12px', color:'#6b7280' }}>{client.assigned?.full_name || '—'}</div>
-                  <div style={{ fontSize:'12px', fontWeight:'500', color: client.ltv > 0 ? '#065f46' : '#9ca3af' }}>
+                  <div style={{ fontSize: '12px', color: '#6b7280' }}>{client.assigned?.full_name || '—'}</div>
+                  <div style={{ fontSize: '12px', fontWeight: '500', color: client.ltv > 0 ? '#065f46' : '#9ca3af' }}>
                     {client.ltv > 0 ? `£${Number(client.ltv).toLocaleString()}` : '—'}
                   </div>
-                  <div style={{ fontSize:'11px', color:'#9ca3af' }}>{fmtDate(client.last_contact_date)}</div>
-                  <div style={{ display:'flex', gap:'4px' }} onClick={e => e.stopPropagation()}>
+                  <div style={{ fontSize: '11px', color: '#9ca3af' }}>{fmtDate(client.last_contact_date)}</div>
+                  <div style={{ display: 'flex', gap: '4px' }} onClick={e => e.stopPropagation()}>
                     <button onClick={() => openEdit(client)} style={S.btnSm()}>Edytuj</button>
                     <button onClick={() => handleDelete(client.id)} style={S.btnSm('red')}>Usun</button>
                   </div>
@@ -488,104 +790,93 @@ export default function CRM() {
               )
             })}
           </div>
-          {viewMode === 'kanban' && segFilter === 'b2b' && (
-            <div style={{ display:'flex', gap:'10px', overflowX:'auto', paddingBottom:'10px', marginTop:'14px' }}>
+
+          {/* KANBAN */}
+          {viewMode === 'kanban' && segFilter === 'b2b' && !aiFilterIds && (
+            <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '10px', marginTop: '14px' }}>
               {STATUSES.b2b.filter(s => s.key !== 'lost').map(status => {
                 const colClients = filtered.filter(c => c.segment === 'b2b' && c.status === status.key)
                 return (
-                  <div key={status.key} style={{ minWidth:'200px', flex:'0 0 200px' }}>
-                    <div style={{ padding:'8px 10px', borderRadius:'8px 8px 0 0', background:status.bg, border:`1px solid ${status.color}30`, borderBottom:'none', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                      <span style={{ fontSize:'11px', fontWeight:'600', color:status.color }}>{lang==='pl'?status.label:status.labelEn}</span>
-                      <span style={{ fontSize:'11px', fontWeight:'600', color:status.color, background:'white', padding:'1px 6px', borderRadius:'10px' }}>{colClients.length}</span>
+                  <div key={status.key} style={{ minWidth: '200px', flex: '0 0 200px' }}>
+                    <div style={{ padding: '8px 10px', borderRadius: '8px 8px 0 0', background: status.bg, border: `1px solid ${status.color}30`, borderBottom: 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '11px', fontWeight: '600', color: status.color }}>{status.label}</span>
+                      <span style={{ fontSize: '11px', fontWeight: '600', color: status.color, background: 'white', padding: '1px 6px', borderRadius: '10px' }}>{colClients.length}</span>
                     </div>
-                    <div style={{ background:'#fafaf9', border:`1px solid ${status.color}30`, borderTop:'none', borderRadius:'0 0 8px 8px', minHeight:'100px', padding:'6px' }}>
+                    <div style={{ background: '#fafaf9', border: `1px solid ${status.color}30`, borderTop: 'none', borderRadius: '0 0 8px 8px', minHeight: '100px', padding: '6px' }}>
                       {colClients.map(c => (
                         <div key={c.id} onClick={() => openDetail(c)}
-                          style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'7px', padding:'9px 10px', marginBottom:'6px', cursor:'pointer' }}
+                          style={{ background: '#fff', border: '1px solid #e8e8e6', borderRadius: '7px', padding: '9px 10px', marginBottom: '6px', cursor: 'pointer' }}
                           onMouseEnter={e => e.currentTarget.style.borderColor = status.color}
                           onMouseLeave={e => e.currentTarget.style.borderColor = '#e8e8e6'}>
-                          <div style={{ fontSize:'12px', fontWeight:'500', color:'#111', marginBottom:'3px' }}>{c.company_name || c.contact_name}</div>
-                          {c.company_name && <div style={{ fontSize:'10px', color:'#9ca3af', marginBottom:'4px' }}>{c.contact_name}</div>}
-                          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-                            <span style={{ fontSize:'10px', color:'#9ca3af' }}>{c.source}</span>
-                            {c.ltv > 0 && <span style={{ fontSize:'10px', fontWeight:'600', color:'#065f46' }}>£{Number(c.ltv).toLocaleString()}</span>}
-                          </div>
-                          {c.is_vip && <span style={{ fontSize:'9px', background:'#fffbeb', color:'#92400e', border:'1px solid #fde68a', borderRadius:'3px', padding:'1px 4px', display:'inline-block', marginTop:'3px' }}>⭐ VIP</span>}
-                          {daysSince(c.last_contact_date) >= 7 && c.status !== 'active' && (
-                            <div style={{ fontSize:'9px', color:'#dc2626', marginTop:'3px' }}>⚠️ {daysSince(c.last_contact_date)}d bez kontaktu</div>
-                          )}
+                          <div style={{ fontSize: '12px', fontWeight: '500', color: '#111', marginBottom: '3px' }}>{c.company_name || c.contact_name}</div>
+                          {c.ltv > 0 && <div style={{ fontSize: '10px', fontWeight: '600', color: '#065f46' }}>£{Number(c.ltv).toLocaleString()}</div>}
+                          {c.is_vip && <span style={{ fontSize: '9px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', borderRadius: '3px', padding: '1px 4px', display: 'inline-block', marginTop: '3px' }}>⭐ VIP</span>}
                         </div>
                       ))}
-                      {colClients.length === 0 && <div style={{ textAlign:'center', color:'#d1d5db', fontSize:'11px', padding:'20px 0' }}>brak</div>}
+                      {colClients.length === 0 && <div style={{ textAlign: 'center', color: '#d1d5db', fontSize: '11px', padding: '20px 0' }}>brak</div>}
                     </div>
                   </div>
                 )
               })}
             </div>
           )}
-          {viewMode === 'kanban' && segFilter !== 'b2b' && (
-            <div style={{ textAlign:'center', color:'#9ca3af', fontSize:'13px', padding:'40px', background:'#fff', borderRadius:'10px', border:'1px solid #e8e8e6', marginTop:'14px' }}>
-              Widok Kanban dostepny dla segmentu B2B — wybierz filtr B2B powyzej
-            </div>
-          )}
         </div>
       </div>
+
+      {/* DETAIL PANEL */}
       {showDetail && selectedClient && (
-        <div style={{ width:'380px', background:'#fff', borderLeft:'1px solid #e8e8e6', display:'flex', flexDirection:'column', flexShrink:0 }}>
-          <div style={{ padding:'14px 16px', borderBottom:'1px solid #e8e8e6', display:'flex', alignItems:'center', gap:'10px' }}>
-            <div style={{ width:'36px', height:'36px', borderRadius:'50%', background:SEGMENTS[selectedClient.segment]?.bg, color:SEGMENTS[selectedClient.segment]?.color, display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px', fontWeight:'600', flexShrink:0 }}>
+        <div style={{ width: '380px', background: '#fff', borderLeft: '1px solid #e8e8e6', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid #e8e8e6', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: SEGMENTS[selectedClient.segment]?.bg, color: SEGMENTS[selectedClient.segment]?.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '600', flexShrink: 0 }}>
               {initials(selectedClient.contact_name)}
             </div>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontSize:'14px', fontWeight:'600', color:'#111', letterSpacing:'-0.2px' }}>{selectedClient.company_name || selectedClient.contact_name}</div>
-              <div style={{ fontSize:'11px', color:'#9ca3af' }}>{selectedClient.company_name ? selectedClient.contact_name : ''}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '14px', fontWeight: '600', color: '#111', letterSpacing: '-0.2px' }}>{selectedClient.company_name || selectedClient.contact_name}</div>
+              <div style={{ fontSize: '11px', color: '#9ca3af' }}>{selectedClient.company_name ? selectedClient.contact_name : ''}</div>
             </div>
-            <button onClick={() => setShowDetail(false)} style={{ border:'none', background:'#f4f4f3', borderRadius:'5px', width:'24px', height:'24px', cursor:'pointer', color:'#9ca3af', fontSize:'16px', display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
+            <button onClick={() => setShowDetail(false)} style={{ border: 'none', background: '#f4f4f3', borderRadius: '5px', width: '24px', height: '24px', cursor: 'pointer', color: '#9ca3af', fontSize: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
           </div>
-          <div style={{ padding:'12px 16px', borderBottom:'1px solid #e8e8e6' }}>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid #e8e8e6' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               {[
-                { label:'Segment', val: <span style={{ fontSize:'11px', fontWeight:'500', padding:'2px 7px', borderRadius:'5px', background:SEGMENTS[selectedClient.segment]?.bg, color:SEGMENTS[selectedClient.segment]?.color }}>{SEGMENTS[selectedClient.segment]?.labelFull}</span> },
-                { label:'Status', val: <Pill segment={selectedClient.segment} statusKey={selectedClient.status} lang={lang}/> },
-                { label:'Email', val: selectedClient.email || '—' },
-                { label:'Telefon', val: selectedClient.phone || '—' },
-                { label:'WhatsApp', val: selectedClient.whatsapp || '—' },
-                { label:'Zrodlo', val: selectedClient.source || '—' },
-                { label:'LTV', val: selectedClient.ltv > 0 ? `£${Number(selectedClient.ltv).toLocaleString()}` : '—' },
-                { label:'Ost. zamowienie', val: fmtDate(selectedClient.last_order_date) },
+                { label: 'Segment', val: <span style={{ fontSize: '11px', fontWeight: '500', padding: '2px 7px', borderRadius: '5px', background: SEGMENTS[selectedClient.segment]?.bg, color: SEGMENTS[selectedClient.segment]?.color }}>{SEGMENTS[selectedClient.segment]?.labelFull}</span> },
+                { label: 'Status', val: <Pill segment={selectedClient.segment} statusKey={selectedClient.status} lang={lang} /> },
+                { label: 'Email', val: selectedClient.email || '—' },
+                { label: 'Telefon', val: selectedClient.phone || '—' },
+                { label: 'WhatsApp', val: selectedClient.whatsapp || '—' },
+                { label: 'Zrodlo', val: selectedClient.source || '—' },
+                { label: 'LTV', val: selectedClient.ltv > 0 ? `£${Number(selectedClient.ltv).toLocaleString()}` : '—' },
+                { label: 'Ost. zamowienie', val: fmtDate(selectedClient.last_order_date) },
               ].map(item => (
-                <div key={item.label} style={{ padding:'8px 10px', background:'#fafaf9', borderRadius:'7px', border:'1px solid #f0f0ee' }}>
-                  <div style={{ fontSize:'9px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:'500', marginBottom:'3px' }}>{item.label}</div>
-                  <div style={{ fontSize:'12px', color:'#111', fontWeight:'500' }}>{item.val}</div>
+                <div key={item.label} style={{ padding: '8px 10px', background: '#fafaf9', borderRadius: '7px', border: '1px solid #f0f0ee' }}>
+                  <div style={{ fontSize: '9px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '500', marginBottom: '3px' }}>{item.label}</div>
+                  <div style={{ fontSize: '12px', color: '#111', fontWeight: '500' }}>{item.val}</div>
                 </div>
               ))}
             </div>
             {selectedClient.notes && (
-              <div style={{ marginTop:'8px', padding:'9px 11px', background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'7px', fontSize:'12px', color:'#374151' }}>
+              <div style={{ marginTop: '8px', padding: '9px 11px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '7px', fontSize: '12px', color: '#374151' }}>
                 {selectedClient.notes}
               </div>
             )}
-            <div style={{ display:'flex', gap:'6px', marginTop:'10px' }}>
-              <button onClick={() => openEdit(selectedClient)} style={{ ...S.btnPrimary, fontSize:'12px', padding:'6px 12px' }}>Edytuj</button>
-              <button onClick={() => handleDelete(selectedClient.id)} style={{ ...S.btnSm('red'), fontSize:'12px', padding:'6px 12px' }}>Usun klienta</button>
+            <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+              <button onClick={() => openEdit(selectedClient)} style={{ ...S.btnPrimary, fontSize: '12px', padding: '6px 12px' }}>Edytuj</button>
+              <button onClick={() => handleDelete(selectedClient.id)} style={{ ...S.btnSm('red'), fontSize: '12px', padding: '6px 12px' }}>Usun klienta</button>
             </div>
           </div>
-          <div style={{ display:'flex', borderBottom:'1px solid #e8e8e6', flexShrink:0 }}>
-            {[
-              { key:'timeline', label:'Historia' },
-              { key:'tasks', label:`Zadania (${clientTasks.length})` },
-            ].map(tab => (
+          <div style={{ display: 'flex', borderBottom: '1px solid #e8e8e6', flexShrink: 0 }}>
+            {[{ key: 'timeline', label: 'Historia' }, { key: 'tasks', label: `Zadania (${clientTasks.length})` }].map(tab => (
               <button key={tab.key} onClick={() => setDetailTab(tab.key)}
-                style={{ flex:1, padding:'9px', fontSize:'12px', fontWeight:'500', border:'none', background:'transparent', cursor:'pointer', color:detailTab===tab.key?'#111':'#9ca3af', borderBottom:detailTab===tab.key?'2px solid #111':'2px solid transparent', fontFamily:"'DM Sans',sans-serif" }}>
+                style={{ flex: 1, padding: '9px', fontSize: '12px', fontWeight: '500', border: 'none', background: 'transparent', cursor: 'pointer', color: detailTab === tab.key ? '#111' : '#9ca3af', borderBottom: detailTab === tab.key ? '2px solid #111' : '2px solid transparent', fontFamily: "'DM Sans',sans-serif" }}>
                 {tab.label}
               </button>
             ))}
           </div>
-          {detailTab==='timeline' && (
-            <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>
-              <div style={{ fontSize:'10px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.06em', fontWeight:'500', marginBottom:'10px' }}>Historia interakcji</div>
-              <div style={{ marginBottom:'14px', padding:'10px', background:'#fafaf9', border:'1px solid #e8e8e6', borderRadius:'9px' }}>
-                <select value={noteType} onChange={e => setNoteType(e.target.value)} style={{ ...S.select, marginBottom:'7px', fontSize:'12px' }}>
+          {detailTab === 'timeline' && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+              <div style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '500', marginBottom: '10px' }}>Historia interakcji</div>
+              <div style={{ marginBottom: '14px', padding: '10px', background: '#fafaf9', border: '1px solid #e8e8e6', borderRadius: '9px' }}>
+                <select value={noteType} onChange={e => setNoteType(e.target.value)} style={{ ...S.select, marginBottom: '7px', fontSize: '12px' }}>
                   <option value="note">📝 Notatka</option>
                   <option value="call">📞 Telefon</option>
                   <option value="email">✉️ Email</option>
@@ -594,52 +885,52 @@ export default function CRM() {
                   <option value="order">📦 Zamowienie</option>
                   <option value="complaint">⚠️ Reklamacja</option>
                 </select>
-                <div style={{ display:'flex', gap:'6px' }}>
-                  <input value={newNote} onChange={e => setNewNote(e.target.value)} onKeyDown={e => e.key==='Enter' && addNote()}
-                    placeholder="Dodaj notatke... (Enter)" style={{ ...S.input, flex:1, fontSize:'12px' }} />
-                  <button onClick={addNote} disabled={savingNote || !newNote.trim()} style={{ ...S.btnPrimary, fontSize:'12px', padding:'8px 12px', opacity:(!newNote.trim()||savingNote)?0.4:1 }}>+</button>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input value={newNote} onChange={e => setNewNote(e.target.value)} onKeyDown={e => e.key === 'Enter' && addNote()}
+                    placeholder="Dodaj notatke... (Enter)" style={{ ...S.input, flex: 1, fontSize: '12px' }} />
+                  <button onClick={addNote} disabled={savingNote || !newNote.trim()} style={{ ...S.btnPrimary, fontSize: '12px', padding: '8px 12px', opacity: (!newNote.trim() || savingNote) ? 0.4 : 1 }}>+</button>
                 </div>
               </div>
               {interactions.map(item => (
-                <div key={item.id} style={{ marginBottom:'10px', display:'flex', gap:'8px' }}>
-                  <div style={{ fontSize:'16px', flexShrink:0, marginTop:'2px' }}>{interactionIcon[item.type] || '📝'}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'2px' }}>{item.author?.full_name} · {fmtDT(item.created_at)}</div>
-                    <div style={{ fontSize:'12px', color:'#111', lineHeight:'1.5', padding:'7px 10px', background:'#fafaf9', borderRadius:'7px', border:'1px solid #f0f0ee' }}>{item.content}</div>
+                <div key={item.id} style={{ marginBottom: '10px', display: 'flex', gap: '8px' }}>
+                  <div style={{ fontSize: '16px', flexShrink: 0, marginTop: '2px' }}>{interactionIcon[item.type] || '📝'}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: '11px', color: '#9ca3af', marginBottom: '2px' }}>{item.author?.full_name} · {fmtDT(item.created_at)}</div>
+                    <div style={{ fontSize: '12px', color: '#111', lineHeight: '1.5', padding: '7px 10px', background: '#fafaf9', borderRadius: '7px', border: '1px solid #f0f0ee' }}>{item.content}</div>
                   </div>
                 </div>
               ))}
-              {interactions.length === 0 && <div style={{ fontSize:'12px', color:'#9ca3af', textAlign:'center', marginTop:'20px' }}>Brak historii — dodaj pierwsza notatke</div>}
+              {interactions.length === 0 && <div style={{ fontSize: '12px', color: '#9ca3af', textAlign: 'center', marginTop: '20px' }}>Brak historii — dodaj pierwsza notatke</div>}
             </div>
           )}
-          {detailTab==='tasks' && (
-            <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }}>
-                <div style={{ fontSize:'10px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.06em', fontWeight:'500' }}>Zadania powiazane</div>
-                <button onClick={createTaskForClient} style={{ fontSize:'11px', padding:'4px 10px', background:'#111', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>+ Nowe zadanie</button>
+          {detailTab === 'tasks' && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                <div style={{ fontSize: '10px', color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: '500' }}>Zadania powiazane</div>
+                <button onClick={createTaskForClient} style={{ fontSize: '11px', padding: '4px 10px', background: '#111', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>+ Nowe zadanie</button>
               </div>
               {clientTasks.length === 0 && (
-                <div style={{ textAlign:'center', color:'#9ca3af', fontSize:'12px', marginTop:'20px' }}>
-                  <div style={{ marginBottom:'8px' }}>Brak powiazanych zadan</div>
-                  <button onClick={createTaskForClient} style={{ fontSize:'12px', padding:'6px 14px', background:'#f4f4f3', color:'#374151', border:'1px solid #e8e8e6', borderRadius:'7px', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>Stworz pierwsze zadanie</button>
+                <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: '12px', marginTop: '20px' }}>
+                  <div style={{ marginBottom: '8px' }}>Brak powiazanych zadan</div>
+                  <button onClick={createTaskForClient} style={{ fontSize: '12px', padding: '6px 14px', background: '#f4f4f3', color: '#374151', border: '1px solid #e8e8e6', borderRadius: '7px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>Stworz pierwsze zadanie</button>
                 </div>
               )}
               {clientTasks.map(task => {
-                const statusColors = { open:'#1d4ed8', inprogress:'#92400e', waiting:'#6d28d9', done:'#065f46', urgent:'#dc2626' }
-                const statusBg = { open:'#eff6ff', inprogress:'#fffbeb', waiting:'#f5f3ff', done:'#ecfdf5', urgent:'#fef2f2' }
-                const statusLabel = { open:'Otwarte', inprogress:'W trakcie', waiting:'Oczekuje', done:'Zamkniete', urgent:'Pilne' }
+                const statusColors = { open: '#1d4ed8', inprogress: '#92400e', waiting: '#6d28d9', done: '#065f46', urgent: '#dc2626' }
+                const statusBg = { open: '#eff6ff', inprogress: '#fffbeb', waiting: '#f5f3ff', done: '#ecfdf5', urgent: '#fef2f2' }
+                const statusLabel = { open: 'Otwarte', inprogress: 'W trakcie', waiting: 'Oczekuje', done: 'Zamkniete', urgent: 'Pilne' }
                 return (
-                  <div key={task.id} style={{ marginBottom:'8px', padding:'10px 12px', background:'#fafaf9', border:'1px solid #f0f0ee', borderRadius:'8px' }}>
-                    <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:'8px' }}>
-                      <div style={{ flex:1 }}>
-                        <div style={{ fontSize:'12px', fontWeight:'500', color:'#111', marginBottom:'3px' }}>{task.product_name}</div>
-                        <div style={{ fontSize:'10px', color:'#9ca3af' }}>
-                          {task.order_number && <span style={{ color:'#2563eb', fontWeight:'500', marginRight:'6px' }}>{task.order_number}</span>}
+                  <div key={task.id} style={{ marginBottom: '8px', padding: '10px 12px', background: '#fafaf9', border: '1px solid #f0f0ee', borderRadius: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '12px', fontWeight: '500', color: '#111', marginBottom: '3px' }}>{task.product_name}</div>
+                        <div style={{ fontSize: '10px', color: '#9ca3af' }}>
+                          {task.order_number && <span style={{ color: '#2563eb', fontWeight: '500', marginRight: '6px' }}>{task.order_number}</span>}
                           {task.client_name}{task.category ? ' · ' + task.category : ''}
                         </div>
                       </div>
-                      <span style={{ fontSize:'10px', fontWeight:'500', padding:'2px 7px', borderRadius:'10px', background:statusBg[task.status]||'#f3f4f6', color:statusColors[task.status]||'#374151', flexShrink:0 }}>
-                        {statusLabel[task.status]||task.status}
+                      <span style={{ fontSize: '10px', fontWeight: '500', padding: '2px 7px', borderRadius: '10px', background: statusBg[task.status] || '#f3f4f6', color: statusColors[task.status] || '#374151', flexShrink: 0 }}>
+                        {statusLabel[task.status] || task.status}
                       </span>
                     </div>
                   </div>
@@ -649,112 +940,115 @@ export default function CRM() {
           )}
         </div>
       )}
+
+      {/* NEW/EDIT MODAL */}
       {showModal && (
         <div style={S.overlay}>
           <div style={S.modal('560px')}>
-            <div style={{ padding:'18px 20px 14px', borderBottom:'1px solid #e8e8e6', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-              <span style={{ fontSize:'15px', fontWeight:'600', letterSpacing:'-0.2px' }}>{editingClient ? 'Edytuj klienta' : 'Nowy klient'}</span>
-              <button onClick={() => setShowModal(false)} style={{ border:'none', background:'none', fontSize:'20px', cursor:'pointer', color:'#9ca3af', lineHeight:'1' }}>×</button>
+            <div style={{ padding: '18px 20px 14px', borderBottom: '1px solid #e8e8e6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '15px', fontWeight: '600', letterSpacing: '-0.2px' }}>{editingClient ? 'Edytuj klienta' : 'Nowy klient'}</span>
+              <button onClick={() => setShowModal(false)} style={{ border: 'none', background: 'none', fontSize: '20px', cursor: 'pointer', color: '#9ca3af', lineHeight: '1' }}>×</button>
             </div>
-            <div style={{ padding:'18px 20px' }}>
-              <div style={{ display:'flex', gap:'6px', marginBottom:'16px' }}>
-                {Object.entries(SEGMENTS).map(([k,v]) => (
-                  <button key={k} onClick={() => setForm(f => ({ ...f, segment:k, status: STATUSES[k][0].key }))}
-                    style={{ flex:1, padding:'8px', borderRadius:'8px', border:'2px solid', borderColor: form.segment===k ? v.color : '#e8e8e6', background: form.segment===k ? v.bg : '#fafaf9', color: form.segment===k ? v.color : '#6b7280', fontSize:'12px', fontWeight:'500', cursor:'pointer', ...F }}>
+            <div style={{ padding: '18px 20px' }}>
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '16px' }}>
+                {Object.entries(SEGMENTS).map(([k, v]) => (
+                  <button key={k} onClick={() => setForm(f => ({ ...f, segment: k, status: STATUSES[k][0].key }))}
+                    style={{ flex: 1, padding: '8px', borderRadius: '8px', border: '2px solid', borderColor: form.segment === k ? v.color : '#e8e8e6', background: form.segment === k ? v.bg : '#fafaf9', color: form.segment === k ? v.color : '#6b7280', fontSize: '12px', fontWeight: '500', cursor: 'pointer', ...F }}>
                     {v.label}
                   </button>
                 ))}
               </div>
               <div style={S.grid2}>
-                <div><label style={S.label}>Nazwa firmy</label><input value={form.company_name} onChange={e=>setForm(f=>({...f,company_name:e.target.value}))} placeholder="np. ABC Packaging Ltd" style={S.input}/></div>
-                <div><label style={S.label}>Osoba kontaktowa *</label><input value={form.contact_name} onChange={e=>setForm(f=>({...f,contact_name:e.target.value}))} placeholder="Imie Nazwisko" style={S.input}/></div>
+                <div><label style={S.label}>Nazwa firmy</label><input value={form.company_name} onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} placeholder="np. ABC Packaging Ltd" style={S.input} /></div>
+                <div><label style={S.label}>Osoba kontaktowa *</label><input value={form.contact_name} onChange={e => setForm(f => ({ ...f, contact_name: e.target.value }))} placeholder="Imie Nazwisko" style={S.input} /></div>
               </div>
               <div style={S.grid2}>
-                <div><label style={S.label}>Email</label><input value={form.email} onChange={e=>setForm(f=>({...f,email:e.target.value}))} placeholder="email@firma.com" style={S.input}/></div>
-                <div><label style={S.label}>Telefon</label><input value={form.phone} onChange={e=>setForm(f=>({...f,phone:e.target.value}))} placeholder="+44 7..." style={S.input}/></div>
+                <div><label style={S.label}>Email</label><input value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="email@firma.com" style={S.input} /></div>
+                <div><label style={S.label}>Telefon</label><input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="+44 7..." style={S.input} /></div>
               </div>
               <div style={S.grid2}>
                 <div><label style={S.label}>Status</label>
-                  <select value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))} style={S.select}>
-                    {(STATUSES[form.segment]||[]).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                  <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={S.select}>
+                    {(STATUSES[form.segment] || []).map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
                   </select>
                 </div>
                 <div><label style={S.label}>Zrodlo</label>
-                  <select value={form.source} onChange={e=>setForm(f=>({...f,source:e.target.value}))} style={S.select}>
+                  <select value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value }))} style={S.select}>
                     {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
               </div>
               <div style={S.grid2}>
                 <div><label style={S.label}>Przypisz do</label>
-                  <select value={form.assigned_to} onChange={e=>setForm(f=>({...f,assigned_to:e.target.value}))} style={S.select}>
+                  <select value={form.assigned_to} onChange={e => setForm(f => ({ ...f, assigned_to: e.target.value }))} style={S.select}>
                     <option value="">— Nieprzypisane —</option>
                     {users.map(u => <option key={u.id} value={u.id}>{u.full_name}</option>)}
                   </select>
                 </div>
-                <div><label style={S.label}>LTV (£)</label><input type="number" value={form.ltv} onChange={e=>setForm(f=>({...f,ltv:e.target.value}))} placeholder="0" style={S.input}/></div>
+                <div><label style={S.label}>LTV (£)</label><input type="number" value={form.ltv} onChange={e => setForm(f => ({ ...f, ltv: e.target.value }))} placeholder="0" style={S.input} /></div>
               </div>
-              {form.segment==='b2c' && (
-                <div style={{ marginBottom:'12px' }}>
+              {form.segment === 'b2c' && (
+                <div style={{ marginBottom: '12px' }}>
                   <label style={S.label}>Marketplace</label>
-                  <select value={form.marketplace} onChange={e=>setForm(f=>({...f,marketplace:e.target.value}))} style={S.select}>
+                  <select value={form.marketplace} onChange={e => setForm(f => ({ ...f, marketplace: e.target.value }))} style={S.select}>
                     <option value="">— Wybierz —</option>
                     {MARKETPLACES.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
               )}
-              <div style={{ marginBottom:'12px' }}>
+              <div style={{ marginBottom: '12px' }}>
                 <label style={S.label}>Notatka</label>
-                <textarea value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Dodatkowe informacje o kliencie..." style={{ ...S.input, height:'60px', resize:'vertical' }}/>
+                <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Dodatkowe informacje o kliencie..." style={{ ...S.input, height: '60px', resize: 'vertical' }} />
               </div>
-              <div style={{ display:'flex', gap:'10px' }}>
-                <label style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'13px', cursor:'pointer' }}>
-                  <input type="checkbox" checked={form.is_vip} onChange={e=>setForm(f=>({...f,is_vip:e.target.checked}))}/> ⭐ VIP
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={form.is_vip} onChange={e => setForm(f => ({ ...f, is_vip: e.target.checked }))} /> ⭐ VIP
                 </label>
-                <label style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'13px', cursor:'pointer' }}>
-                  <input type="checkbox" checked={form.is_problematic} onChange={e=>setForm(f=>({...f,is_problematic:e.target.checked}))}/> ⚠️ Problematyczny
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={form.is_problematic} onChange={e => setForm(f => ({ ...f, is_problematic: e.target.checked }))} /> ⚠️ Problematyczny
                 </label>
               </div>
             </div>
-            <div style={{ padding:'14px 20px', borderTop:'1px solid #e8e8e6', display:'flex', justifyContent:'flex-end', gap:'8px' }}>
-              <button onClick={() => setShowModal(false)} style={{ ...S.btnSm(), padding:'8px 16px', fontSize:'13px' }}>Anuluj</button>
-              <button onClick={handleSave} disabled={saving || !form.contact_name.trim()} style={{ ...S.btnPrimary, opacity:saving||!form.contact_name.trim()?0.6:1 }}>
+            <div style={{ padding: '14px 20px', borderTop: '1px solid #e8e8e6', display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button onClick={() => setShowModal(false)} style={{ ...S.btnSm(), padding: '8px 16px', fontSize: '13px' }}>Anuluj</button>
+              <button onClick={handleSave} disabled={saving || !form.contact_name.trim()} style={{ ...S.btnPrimary, opacity: saving || !form.contact_name.trim() ? 0.6 : 1 }}>
                 {saving ? 'Zapisywanie...' : editingClient ? 'Zapisz zmiany' : 'Dodaj klienta'}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* RESET MODAL */}
       {showResetModal && isAdmin && (
         <div style={S.overlay}>
-          <div style={{ background:'#fff', borderRadius:'14px', width:'440px', maxWidth:'95vw', border:'2px solid #fecaca', padding:'24px' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px' }}>
-              <span style={{ fontSize:'24px' }}>⚠️</span>
+          <div style={{ background: '#fff', borderRadius: '14px', width: '440px', maxWidth: '95vw', border: '2px solid #fecaca', padding: '24px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+              <span style={{ fontSize: '24px' }}>⚠️</span>
               <div>
-                <div style={{ fontSize:'15px', fontWeight:'700', color:'#dc2626' }}>Wyczysc i importuj od nowa</div>
-                <div style={{ fontSize:'12px', color:'#9ca3af', marginTop:'2px' }}>Ta operacja usunie WSZYSTKICH klientow i interakcje</div>
+                <div style={{ fontSize: '15px', fontWeight: '700', color: '#dc2626' }}>Wyczysc i importuj od nowa</div>
+                <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>Ta operacja usunie WSZYSTKICH klientow i interakcje</div>
               </div>
             </div>
-            <div style={{ background:'#fef2f2', border:'1px solid #fecaca', borderRadius:'8px', padding:'12px', marginBottom:'16px', fontSize:'12px', color:'#dc2626', lineHeight:'1.6' }}>
-              <strong>Co sie stanie:</strong><br/>
-              1. Usunieci zostana wszyscy klienci ({clients.length})<br/>
-              2. Usunieta zostanie cala historia interakcji<br/>
-              3. Reimport z BaseLinker za ostatnie {blDays} dni<br/>
-              <br/>
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '12px', color: '#dc2626', lineHeight: '1.6' }}>
+              <strong>Co sie stanie:</strong><br />
+              1. Usunieci zostana wszyscy klienci ({clients.length})<br />
+              2. Usunieta zostanie cala historia interakcji<br />
+              3. Reimport z BaseLinker za ostatnie {blDays} dni<br />
+              <br />
               <strong>Tej operacji nie mozna cofnac!</strong>
             </div>
-            <div style={{ marginBottom:'16px' }}>
-              <label style={{ ...S.label, color:'#dc2626' }}>Wpisz RESET zeby potwierdzic:</label>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ ...S.label, color: '#dc2626' }}>Wpisz RESET zeby potwierdzic:</label>
               <input value={resetConfirmText} onChange={e => setResetConfirmText(e.target.value)}
                 placeholder="Wpisz: RESET"
-                style={{ ...S.input, border:'2px solid #fecaca', fontWeight:'600', letterSpacing:'1px' }}
+                style={{ ...S.input, border: '2px solid #fecaca', fontWeight: '600', letterSpacing: '1px' }}
                 autoFocus />
             </div>
-            <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
-              <button onClick={() => { setShowResetModal(false); setResetConfirmText('') }}
-                style={{ ...S.btnSm(), padding:'9px 18px', fontSize:'13px' }}>Anuluj</button>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button onClick={() => { setShowResetModal(false); setResetConfirmText('') }} style={{ ...S.btnSm(), padding: '9px 18px', fontSize: '13px' }}>Anuluj</button>
               <button onClick={resetAndSync} disabled={resetConfirmText !== 'RESET'}
-                style={{ padding:'9px 18px', background: resetConfirmText === 'RESET' ? '#dc2626' : '#9ca3af', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'600', cursor: resetConfirmText === 'RESET' ? 'pointer' : 'default', fontFamily:"'DM Sans',sans-serif" }}>
+                style={{ padding: '9px 18px', background: resetConfirmText === 'RESET' ? '#dc2626' : '#9ca3af', color: 'white', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: resetConfirmText === 'RESET' ? 'pointer' : 'default', fontFamily: "'DM Sans',sans-serif" }}>
                 🗑 Tak, wyczysc i importuj
               </button>
             </div>
