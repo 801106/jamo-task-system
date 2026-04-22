@@ -4,6 +4,7 @@ import ChatPanel from '../components/ChatPanel'
 import { supabase } from '../../lib/supabase'
 import { useRouter } from 'next/navigation'
 
+const ADMIN_ID = 'd53f6727-6bc7-4602-9ce0-4fc31ab3aba1'
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ''
 
 const WORKSPACES = [
@@ -47,7 +48,8 @@ const T = {
     moveTitle:'Przenies zadanie', moveTo:'Przenies do:',
     archiveNote:'Zamkniete zadania trafiaja do archiwum',
     notifOn:'Powiadomienia wlaczone', notifOff:'Wlacz powiadomienia', notifBlocked:'Powiadomienia zablokowane',
-    descLabel:'Opis',
+    descLabel:'Opis', assignedTo:'Przypisano do',
+    notifications:'Powiadomienia', markAllRead:'Oznacz wszystkie jako przeczytane', noNotifs:'Brak nowych powiadomien',
   },
   en: {
     appSub:'Jamo Operations', ws:'Workspace',
@@ -74,7 +76,8 @@ const T = {
     moveTitle:'Move task', moveTo:'Move to:',
     archiveNote:'Closed tasks go to archive',
     notifOn:'Notifications on', notifOff:'Enable notifications', notifBlocked:'Notifications blocked',
-    descLabel:'Description',
+    descLabel:'Description', assignedTo:'Assigned to',
+    notifications:'Notifications', markAllRead:'Mark all as read', noNotifs:'No new notifications',
   }
 }
 
@@ -127,17 +130,144 @@ const S = {
   metaLabel: { fontSize:'10px', color:'#9ca3af', marginBottom:'5px', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:'500' },
 }
 
-
-
 function FormField({ label, children }) {
   return <div><label style={S.label}>{label}</label>{children}</div>
+}
+
+// Multi-select users component
+function UserMultiSelect({ users, selected, onChange, placeholder }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  const toggle = (id) => {
+    if (selected.includes(id)) {
+      onChange(selected.filter(s => s !== id))
+    } else {
+      onChange([...selected, id])
+    }
+  }
+
+  const selectedUsers = users.filter(u => selected.includes(u.id))
+
+  return (
+    <div ref={ref} style={{ position:'relative' }}>
+      <div onClick={() => setOpen(v => !v)}
+        style={{ ...S.input, cursor:'pointer', display:'flex', alignItems:'center', flexWrap:'wrap', gap:'4px', minHeight:'40px', padding:'6px 12px' }}>
+        {selectedUsers.length === 0 && <span style={{ color:'#9ca3af', fontSize:'13px' }}>{placeholder || '— Wybierz osoby —'}</span>}
+        {selectedUsers.map(u => (
+          <span key={u.id} style={{ background:'#eff6ff', color:'#1d4ed8', fontSize:'11px', padding:'2px 8px', borderRadius:'20px', fontWeight:'500', display:'flex', alignItems:'center', gap:'4px' }}>
+            {u.full_name}
+            <span onClick={e => { e.stopPropagation(); toggle(u.id) }} style={{ cursor:'pointer', fontSize:'14px', lineHeight:'1', color:'#93c5fd' }}>×</span>
+          </span>
+        ))}
+        <span style={{ marginLeft:'auto', color:'#9ca3af', fontSize:'12px' }}>▾</span>
+      </div>
+      {open && (
+        <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:'1px solid #e8e8e6', borderRadius:'8px', zIndex:100, maxHeight:'180px', overflowY:'auto', boxShadow:'0 4px 12px rgba(0,0,0,0.1)', marginTop:'2px' }}>
+          {users.map(u => (
+            <div key={u.id} onClick={() => toggle(u.id)}
+              style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 12px', cursor:'pointer', background: selected.includes(u.id) ? '#eff6ff' : 'transparent' }}
+              onMouseEnter={e => { if (!selected.includes(u.id)) e.currentTarget.style.background = '#f4f4f3' }}
+              onMouseLeave={e => { if (!selected.includes(u.id)) e.currentTarget.style.background = 'transparent' }}>
+              <div style={{ width:'22px', height:'22px', borderRadius:'50%', background: selected.includes(u.id) ? '#dbeafe' : '#f0f0ee', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'9px', fontWeight:'600', color: selected.includes(u.id) ? '#1d4ed8' : '#6b7280' }}>
+                {(u.full_name||'?').substring(0,2).toUpperCase()}
+              </div>
+              <span style={{ fontSize:'13px', color:'#111', flex:1 }}>{u.full_name}</span>
+              {selected.includes(u.id) && <span style={{ color:'#1d4ed8', fontSize:'14px' }}>✓</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Notification bell component
+function NotificationBell({ notifications, onMarkRead, onMarkAllRead, onClickNotif }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  const unread = notifications.filter(n => !n.read).length
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [])
+
+  const notifIcon = {
+    task_assigned: '👤',
+    comment_added: '💬',
+    file_added: '📎',
+    status_changed: '🔄',
+    message: '📨',
+  }
+
+  const fmtTime = (d) => {
+    const diff = Date.now() - new Date(d).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return 'przed chwila'
+    if (mins < 60) return `${mins} min temu`
+    const hrs = Math.floor(mins / 60)
+    if (hrs < 24) return `${hrs}h temu`
+    return new Date(d).toLocaleDateString('pl-PL')
+  }
+
+  return (
+    <div ref={ref} style={{ position:'relative' }}>
+      <button onClick={() => setOpen(v => !v)}
+        style={{ position:'relative', width:'38px', height:'38px', background: open ? '#f4f4f3' : '#fff', border:'1px solid #e8e8e6', borderRadius:'8px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'17px' }}>
+        🔔
+        {unread > 0 && (
+          <span style={{ position:'absolute', top:'-5px', right:'-5px', width:'18px', height:'18px', background:'#dc2626', color:'white', borderRadius:'50%', fontSize:'10px', fontWeight:'700', display:'flex', alignItems:'center', justifyContent:'center' }}>
+            {unread > 9 ? '9+' : unread}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, width:'360px', background:'#fff', border:'1px solid #e8e8e6', borderRadius:'12px', boxShadow:'0 8px 24px rgba(0,0,0,0.12)', zIndex:200 }}>
+          <div style={{ padding:'12px 16px', borderBottom:'1px solid #e8e8e6', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <span style={{ fontSize:'13px', fontWeight:'600', color:'#111' }}>Powiadomienia {unread > 0 && <span style={{ background:'#dc2626', color:'white', fontSize:'10px', padding:'1px 6px', borderRadius:'10px', marginLeft:'4px' }}>{unread}</span>}</span>
+            {unread > 0 && <button onClick={onMarkAllRead} style={{ fontSize:'11px', color:'#2563eb', border:'none', background:'none', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>Oznacz wszystkie</button>}
+          </div>
+          <div style={{ maxHeight:'380px', overflowY:'auto' }}>
+            {notifications.length === 0 && (
+              <div style={{ padding:'32px', textAlign:'center', color:'#9ca3af', fontSize:'13px' }}>Brak powiadomien 🎉</div>
+            )}
+            {notifications.slice(0, 20).map(n => (
+              <div key={n.id} onClick={() => { onMarkRead(n.id); onClickNotif(n); setOpen(false) }}
+                style={{ display:'flex', gap:'10px', padding:'12px 16px', borderBottom:'1px solid #f0f0ee', cursor:'pointer', background: n.read ? '#fff' : '#fafbff' }}
+                onMouseEnter={e => e.currentTarget.style.background = '#f4f4f3'}
+                onMouseLeave={e => e.currentTarget.style.background = n.read ? '#fff' : '#fafbff'}>
+                <div style={{ fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{notifIcon[n.type] || '🔔'}</div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:'12px', fontWeight: n.read ? '400' : '600', color:'#111', marginBottom:'2px' }}>{n.title}</div>
+                  {n.body && <div style={{ fontSize:'11px', color:'#6b7280', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{n.body}</div>}
+                  <div style={{ fontSize:'10px', color:'#9ca3af', marginTop:'3px' }}>{fmtTime(n.created_at)}</div>
+                </div>
+                {!n.read && <div style={{ width:'7px', height:'7px', borderRadius:'50%', background:'#2563eb', flexShrink:0, marginTop:'5px' }}></div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function Dashboard() {
   const router = useRouter()
   const [lang, setLang] = useState('pl')
   const t = T[lang]
-  const sl = (l) => ({ open:T[l].col4==='Status'?'Open':'Otwarte', inprogress:l==='en'?'In progress':'W trakcie', waiting:l==='en'?'Waiting':'Oczekuje', done:l==='en'?'Closed':'Zamkniete', urgent:l==='en'?'Urgent':'Pilne' })
   const statusLabel = (s) => lang==='en' ? STATUS_META[s]?.labelEn : STATUS_META[s]?.label
 
   const [user, setUser] = useState(null)
@@ -153,6 +283,7 @@ export default function Dashboard() {
   const [showPreview, setShowPreview] = useState(false)
   const [showMove, setShowMove] = useState(false)
   const [selectedTask, setSelectedTask] = useState(null)
+  const [highlightedTaskId, setHighlightedTaskId] = useState(null)
   const [taskFiles, setTaskFiles] = useState([])
   const [comments, setComments] = useState([])
   const [newComment, setNewComment] = useState('')
@@ -175,11 +306,16 @@ export default function Dashboard() {
   const [chatTaskSearch, setChatTaskSearch] = useState('')
   const [chatAllTasks, setChatAllTasks] = useState([])
   const [chatSending, setChatSending] = useState(false)
+  const [notifications, setNotifications] = useState([])
   const chatEndRef = useRef(null)
   const chatFileRef = useRef(null)
   const chatInputRef = useRef(null)
   const fileRef = useRef(null)
-  const [form, setForm] = useState({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'', deadline:'', client_id:'' })
+  const [form, setForm] = useState({
+    order_number:'', claim_number:'', product_name:'', sku:'', client_name:'',
+    marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open',
+    priority:'med', assigned_to:'', assigned_users:[], deadline:'', client_id:''
+  })
   const [crmClients, setCrmClients] = useState([])
 
   useEffect(() => {
@@ -191,19 +327,83 @@ export default function Dashboard() {
     })
     supabase.from('profiles').select('id, full_name').then(({ data }) => setUsers(data || []))
     supabase.from('clients').select('id, company_name, contact_name, segment').order('company_name').then(({ data }) => setCrmClients(data || []))
-
-    // Auto-logout warning after 7.5 hours, logout after 8 hours
     const warnTimer = setTimeout(() => setShowTimeoutWarning(true), 7.5 * 60 * 60 * 1000)
     const logoutTimer = setTimeout(async () => { await supabase.auth.signOut(); router.push('/?timeout=1') }, 8 * 60 * 60 * 1000)
     return () => { clearTimeout(warnTimer); clearTimeout(logoutTimer) }
-    if ('Notification' in window) setNotifStatus(Notification.permission)
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{})
   }, [])
+
+  // Load notifications
+  const loadNotifications = useCallback(async () => {
+    if (!user) return
+    const { data } = await supabase.from('notifications')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50)
+    setNotifications(data || [])
+  }, [user])
+
+  useEffect(() => { loadNotifications() }, [loadNotifications])
+
+  // Realtime notifications
+  useEffect(() => {
+    if (!user) return
+    const ch = supabase.channel('notifs-rt')
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'notifications', filter:`user_id=eq.${user.id}` }, () => loadNotifications())
+      .subscribe()
+    return () => supabase.removeChannel(ch)
+  }, [user, loadNotifications])
+
+  async function markNotifRead(id) {
+    await supabase.from('notifications').update({ read: true }).eq('id', id)
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))
+  }
+
+  async function markAllNotifsRead() {
+    if (!user) return
+    await supabase.from('notifications').update({ read: true }).eq('user_id', user.id).eq('read', false)
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+  }
+
+  async function handleClickNotif(notif) {
+    if (notif.task_id) {
+      // Find task and open it
+      const task = tasks.find(t => t.id === notif.task_id)
+      if (task) {
+        setHighlightedTaskId(notif.task_id)
+        await openPreview(task)
+        setTimeout(() => setHighlightedTaskId(null), 3000)
+      } else {
+        // Task might be in different workspace - just highlight
+        setHighlightedTaskId(notif.task_id)
+        setTimeout(() => setHighlightedTaskId(null), 3000)
+      }
+    } else if (notif.type === 'message') {
+      setShowChat(true)
+    }
+  }
+
+  async function createNotification(userIds, type, title, body, taskId = null, messageId = null) {
+    if (!userIds || userIds.length === 0) return
+    const records = userIds.map(uid => ({
+      user_id: uid,
+      type,
+      title,
+      body,
+      task_id: taskId || null,
+      message_id: messageId || null,
+      read: false,
+    }))
+    await supabase.from('notifications').insert(records)
+  }
 
   function toggleLang() { const n=lang==='pl'?'en':'pl'; setLang(n); localStorage.setItem('tf_lang',n) }
 
   const loadTasks = useCallback(async () => {
-    const { data } = await supabase.from('tasks').select('*, assigned_profile:profiles!assigned_to(full_name)').eq('area', workspace).order('created_at', { ascending: false })
+    const { data } = await supabase.from('tasks')
+      .select('*, assigned_profile:profiles!assigned_to(full_name)')
+      .eq('area', workspace)
+      .order('created_at', { ascending: false })
     setTasks(data || [])
   }, [workspace])
 
@@ -214,28 +414,70 @@ export default function Dashboard() {
   }, [workspace, loadTasks])
 
   async function loadFiles(id) { const { data } = await supabase.storage.from('task-files').list(id); setTaskFiles(data||[]) }
-  async function loadComments(id) { const { data } = await supabase.from('comments').select('*, author:profiles!author_id(full_name)').eq('task_id', id).order('created_at',{ascending:true}); setComments(data||[]) }
+  async function loadComments(id) {
+    const { data } = await supabase.from('comments')
+      .select('*, author:profiles!author_id(full_name)')
+      .eq('task_id', id)
+      .order('created_at', { ascending: true })
+    setComments(data||[])
+  }
 
   async function uploadFile(e) {
     const file = e.target.files[0]; if (!file||!selectedTask) return
     setUploading(true)
     await supabase.storage.from('task-files').upload(`${selectedTask.id}/${Date.now()}_${file.name}`, file)
-    await loadFiles(selectedTask.id); setUploading(false)
+    await loadFiles(selectedTask.id)
+
+    // Notify all assigned users
+    const assignedUsers = selectedTask.assigned_users || []
+    if (selectedTask.assigned_to) assignedUsers.push(selectedTask.assigned_to)
+    const toNotify = [...new Set(assignedUsers)].filter(uid => uid !== user.id)
+    if (toNotify.length > 0) {
+      await createNotification(
+        toNotify,
+        'file_added',
+        `📎 ${profile?.full_name} dodal plik`,
+        `${file.name} → ${selectedTask.product_name}`,
+        selectedTask.id
+      )
+    }
+    setUploading(false)
   }
+
   async function deleteFile(name) {
     if (!confirm(t.delFileConfirm)) return
     await supabase.storage.from('task-files').remove([`${selectedTask.id}/${name}`]); await loadFiles(selectedTask.id)
   }
+
   async function getFileUrl(name) {
     const { data } = await supabase.storage.from('task-files').createSignedUrl(`${selectedTask.id}/${name}`, 3600)
     if (data?.signedUrl) window.open(data.signedUrl,'_blank')
   }
+
   async function sendComment() {
     if (!newComment.trim()||!selectedTask||!user) return
     setSendingCmt(true)
     await supabase.from('comments').insert({ task_id:selectedTask.id, author_id:user.id, content:newComment.trim() })
-    setNewComment(''); await loadComments(selectedTask.id); setSendingCmt(false)
+
+    // Notify all assigned users
+    const assignedUsers = [...(selectedTask.assigned_users || [])]
+    if (selectedTask.assigned_to) assignedUsers.push(selectedTask.assigned_to)
+    const toNotify = [...new Set(assignedUsers)].filter(uid => uid !== user.id)
+    if (toNotify.length > 0) {
+      await createNotification(
+        toNotify,
+        'comment_added',
+        `💬 ${profile?.full_name} dodal komentarz`,
+        `"${newComment.trim().substring(0, 60)}${newComment.length > 60 ? '...' : ''}" → ${selectedTask.product_name}`,
+        selectedTask.id
+      )
+    }
+
+    setNewComment('')
+    await loadComments(selectedTask.id)
+    setSendingCmt(false)
   }
+
   async function logout() { await supabase.auth.signOut(); router.push('/') }
 
   function openNew() {
@@ -243,68 +485,152 @@ export default function Dashboard() {
     const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
     const clientId = params?.get('client_id') || ''
     const clientName = params?.get('client_name') || ''
-    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:clientName, marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'', deadline:'', client_id:clientId })
+    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:clientName, marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'', assigned_users:[], deadline:'', client_id:clientId })
     setShowModal(true)
   }
+
   function openEdit(task) {
     setEditingTask(task)
-    setForm({ order_number:task.order_number||'', claim_number:task.claim_number||'', product_name:task.product_name||'', sku:task.sku||'', client_name:task.client_name||'', marketplace:task.marketplace||'Amazon UK', category:task.category||'Reklamacja', description:task.description||'', status:task.status||'open', priority:task.priority||'med', assigned_to:task.assigned_to||'', deadline:task.deadline?task.deadline.split('T')[0]:'', client_id:task.client_id||'' })
+    setForm({
+      order_number:task.order_number||'',
+      claim_number:task.claim_number||'',
+      product_name:task.product_name||'',
+      sku:task.sku||'',
+      client_name:task.client_name||'',
+      marketplace:task.marketplace||'Amazon UK',
+      category:task.category||'Reklamacja',
+      description:task.description||'',
+      status:task.status||'open',
+      priority:task.priority||'med',
+      assigned_to:task.assigned_to||'',
+      assigned_users:task.assigned_users||[],
+      deadline:task.deadline?task.deadline.split('T')[0]:'',
+      client_id:task.client_id||''
+    })
     setShowModal(true)
   }
+
   async function openDetail(task) { setSelectedTask(task); setShowDetail(true); await loadFiles(task.id); await loadComments(task.id) }
   async function openPreview(task) { setSelectedTask(task); setShowPreview(true); await loadComments(task.id); await loadFiles(task.id) }
+
   function openMove(task) {
     setSelectedTask(task)
     const avail = WORKSPACES.filter(w=>w.key!==workspace&&(profile?.role==='admin'||(profile?.areas||[]).includes(w.key)))
     setMoveTarget(avail[0]?.key||''); setShowMove(true)
   }
+
   async function doMove() {
     if (!moveTarget||!selectedTask) return
     await supabase.from('tasks').update({ area:moveTarget }).eq('id',selectedTask.id)
     setShowMove(false); loadTasks()
   }
+
   async function handleSave() {
     if (!form.product_name) return
     setSaving(true)
-    const payload = { ...form, assigned_to:form.assigned_to||null, deadline:form.deadline||null, client_id:form.client_id||null }
+
+    // Merge assigned_to into assigned_users
+    const allAssigned = [...new Set([
+      ...(form.assigned_users || []),
+      ...(form.assigned_to ? [form.assigned_to] : [])
+    ])]
+
+    const payload = {
+      ...form,
+      assigned_to: form.assigned_to || (allAssigned[0] || null),
+      assigned_users: allAssigned,
+      deadline: form.deadline || null,
+      client_id: form.client_id || null
+    }
+
     if (editingTask) {
-      if (form.assigned_to && form.assigned_to!==editingTask.assigned_to) {
-        await supabase.from('messages').insert({
-          sender_id: user.id,
-          receiver_id: form.assigned_to,
-          content: `Przypisano Ci zadanie: ${form.product_name}`,
-          task_id: editingTask.id,
-          task_ref: `#${editingTask.order_number||editingTask.id.substring(0,6).toUpperCase()} · ${form.product_name}`,
-        })
-      }
       await supabase.from('tasks').update(payload).eq('id', editingTask.id)
+
+      // Notify newly assigned users
+      const prevAssigned = editingTask.assigned_users || []
+      if (editingTask.assigned_to) prevAssigned.push(editingTask.assigned_to)
+      const newlyAssigned = allAssigned.filter(uid => !prevAssigned.includes(uid) && uid !== user.id)
+
+      if (newlyAssigned.length > 0) {
+        await createNotification(
+          newlyAssigned,
+          'task_assigned',
+          `👤 ${profile?.full_name} przypisal Ci zadanie`,
+          form.product_name,
+          editingTask.id
+        )
+      }
+
+      // Notify about status change
+      if (form.status !== editingTask.status) {
+        const toNotify = allAssigned.filter(uid => uid !== user.id)
+        if (toNotify.length > 0) {
+          await createNotification(
+            toNotify,
+            'status_changed',
+            `🔄 Status zmieniony: ${statusLabel(form.status)}`,
+            form.product_name,
+            editingTask.id
+          )
+        }
+        // Also send chat message
+        if (editingTask.assigned_to && editingTask.assigned_to !== user.id) {
+          await supabase.from('messages').insert({
+            sender_id: user.id,
+            receiver_id: editingTask.assigned_to,
+            content: `Status zadania zmieniony na: ${statusLabel(form.status)} — ${form.product_name}`,
+            task_id: editingTask.id,
+            task_ref: `#${editingTask.order_number||editingTask.id.substring(0,6).toUpperCase()} · ${form.product_name}`,
+          })
+        }
+      }
     } else {
       const { data: newTask } = await supabase.from('tasks').insert({ ...payload, area:workspace, created_by:user.id }).select().single()
-      if (form.assigned_to && form.assigned_to!==user.id && newTask) {
-        await supabase.from('messages').insert({
-          sender_id: user.id,
-          receiver_id: form.assigned_to,
-          content: `Przypisano Ci nowe zadanie: ${form.product_name}`,
-          task_id: newTask.id,
-          task_ref: `#${newTask.order_number||newTask.id.substring(0,6).toUpperCase()} · ${form.product_name}`,
-        })
+      if (newTask && allAssigned.length > 0) {
+        const toNotify = allAssigned.filter(uid => uid !== user.id)
+        if (toNotify.length > 0) {
+          await createNotification(
+            toNotify,
+            'task_assigned',
+            `👤 ${profile?.full_name} przypisal Ci nowe zadanie`,
+            form.product_name,
+            newTask.id
+          )
+          // Also send chat message to primary assignee
+          if (form.assigned_to && form.assigned_to !== user.id) {
+            await supabase.from('messages').insert({
+              sender_id: user.id,
+              receiver_id: form.assigned_to,
+              content: `Przypisano Ci nowe zadanie: ${form.product_name}`,
+              task_id: newTask.id,
+              task_ref: `#${newTask.order_number||newTask.id.substring(0,6).toUpperCase()} · ${form.product_name}`,
+            })
+          }
+        }
       }
     }
     setSaving(false); setShowModal(false); setEditingTask(null); loadTasks()
   }
-  async function deleteTask(id) { if (!confirm(t.delConfirm)) return; await supabase.from('tasks').delete().eq('id',id); loadTasks() }
-  async function changeStatus(id, status) { await supabase.from('tasks').update({ status }).eq('id',id); loadTasks() }
 
-  async function enableNotifications() {
-    if (!('Notification' in window)||!('serviceWorker' in navigator)) return
-    const perm = await Notification.requestPermission(); setNotifStatus(perm)
-    if (perm!=='granted') return
-    try {
-      const reg = await navigator.serviceWorker.ready
-      const sub = await reg.pushManager.subscribe({ userVisibleOnly:true, applicationServerKey:urlBase64ToUint8Array(VAPID_PUBLIC_KEY) })
-      const { data: { user } } = await supabase.auth.getUser()
-      await supabase.from('push_subscriptions').upsert({ user_id:user.id, subscription:sub.toJSON() })
-    } catch(e) { console.error(e) }
+  async function deleteTask(id) { if (!confirm(t.delConfirm)) return; await supabase.from('tasks').delete().eq('id',id); loadTasks() }
+
+  async function changeStatus(id, status, task) {
+    await supabase.from('tasks').update({ status }).eq('id', id)
+
+    // Notify assigned users
+    const assignedUsers = [...(task.assigned_users || [])]
+    if (task.assigned_to) assignedUsers.push(task.assigned_to)
+    const toNotify = [...new Set(assignedUsers)].filter(uid => uid !== user.id)
+    if (toNotify.length > 0) {
+      await createNotification(
+        toNotify,
+        'status_changed',
+        `🔄 ${profile?.full_name} zmienil status`,
+        `${statusLabel(status)} → ${task.product_name}`,
+        id
+      )
+    }
+    loadTasks()
   }
 
   // CHAT
@@ -336,7 +662,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!user) return
-    const ch = supabase.channel('chat-rt').on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'},()=>{loadChatMsgs();loadChatUnread()}).subscribe()
+    const ch = supabase.channel('chat-rt')
+      .on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'}, async (payload) => {
+        loadChatMsgs()
+        loadChatUnread()
+        // Create notification for new message
+        if (payload.new.receiver_id === user.id) {
+          loadNotifications()
+        }
+      })
+      .subscribe()
     return () => supabase.removeChannel(ch)
   }, [user, chatSelected, loadChatMsgs])
 
@@ -345,11 +680,22 @@ export default function Dashboard() {
   async function sendChatMsg() {
     if (!chatText.trim()||!chatSelected||!user) return
     setChatSending(true)
-    await supabase.from('messages').insert({
+    const msg = await supabase.from('messages').insert({
       sender_id:user.id, receiver_id:chatSelected.id, content:chatText.trim(),
       task_id:chatTaskObj?.id||null,
       task_ref:chatTaskObj?`#${chatTaskObj.order_number||chatTaskObj.id.substring(0,6).toUpperCase()} · ${chatTaskObj.product_name}`:null,
-    })
+    }).select().single()
+
+    // Create notification
+    await createNotification(
+      [chatSelected.id],
+      'message',
+      `📨 ${profile?.full_name}`,
+      chatText.trim().substring(0, 80),
+      chatTaskObj?.id || null,
+      msg.data?.id || null
+    )
+
     await fetch('/api/send-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:chatSelected.id,title:`💬 ${profile?.full_name}`,body:chatText.trim(),url:'/dashboard'})})
     setChatText(''); setChatTaskObj(null); setChatTaskRef(''); setChatSending(false)
     chatInputRef.current?.focus()
@@ -363,6 +709,7 @@ export default function Dashboard() {
       const {data:u} = await supabase.storage.from('task-files').createSignedUrl(path, 86400*30)
       await supabase.from('messages').insert({sender_id:user.id,receiver_id:chatSelected.id,file_url:u?.signedUrl,file_name:file.name,file_size:file.size,task_id:chatTaskObj?.id||null,task_ref:chatTaskObj?`#${chatTaskObj.order_number} · ${chatTaskObj.product_name}`:null})
       if (chatTaskObj?.id) await supabase.storage.from('task-files').copy(path,`${chatTaskObj.id}/${Date.now()}_${file.name}`)
+      await createNotification([chatSelected.id], 'message', `📎 ${profile?.full_name} wyslal plik`, file.name, chatTaskObj?.id || null)
       await fetch('/api/send-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:chatSelected.id,title:`📎 ${profile?.full_name}`,body:file.name,url:'/dashboard'})})
       setChatTaskObj(null); setChatTaskRef('')
     }
@@ -376,75 +723,89 @@ export default function Dashboard() {
   const filtered = active.filter(t2 => {
     if (filter==='urgent' && t2.status!=='urgent') return false
     if (filter==='open' && !['open','inprogress','waiting'].includes(t2.status)) return false
-    if (filter==='mine' && t2.assigned_to!==user?.id) return false
+    if (filter==='mine' && t2.assigned_to!==user?.id && !(t2.assigned_users||[]).includes(user?.id)) return false
     if (search) { const q=search.toLowerCase(); return (t2.order_number||'').toLowerCase().includes(q)||(t2.product_name||'').toLowerCase().includes(q)||(t2.client_name||'').toLowerCase().includes(q)||(t2.claim_number||'').toLowerCase().includes(q) }
     return true
   })
-  const counts = { all:active.length, open:active.filter(t2=>['open','inprogress','waiting'].includes(t2.status)).length, urgent:active.filter(t2=>t2.status==='urgent').length, mine:active.filter(t2=>t2.assigned_to===user?.id).length, archive:archived.length }
+
+  const counts = {
+    all:active.length,
+    open:active.filter(t2=>['open','inprogress','waiting'].includes(t2.status)).length,
+    urgent:active.filter(t2=>t2.status==='urgent').length,
+    mine:active.filter(t2=>t2.assigned_to===user?.id||(t2.assigned_users||[]).includes(user?.id)).length,
+    archive:archived.length
+  }
+
   const availWS = WORKSPACES.filter(w=>w.key!==workspace&&(profile?.role==='admin'||(profile?.areas||[]).includes(w.key)))
-  const cols = '100px 1fr 100px 120px 90px 70px 80px 140px'
+  const cols = '100px 1fr 100px 120px 120px 70px 80px 140px'
   const fmtDate = (d) => d?new Date(d).toLocaleDateString(lang==='pl'?'pl-PL':'en-GB'):''
   const fmtDT = (d) => d?new Date(d).toLocaleString(lang==='pl'?'pl-PL':'en-GB',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):''
   const fileIcon = (n) => n.match(/\.(jpg|jpeg|png|gif|webp)$/i)?'IMG':n.match(/\.pdf$/i)?'PDF':n.match(/\.docx?$/i)?'DOC':n.match(/\.xlsx?$/i)?'XLS':'FILE'
   const initials = (name) => (name||'?').substring(0,2).toUpperCase()
 
-  const notifBtnStyle = notifStatus==='granted'
-    ? { bg:'#f0fdf4', color:'#166534', label:'✓ '+t.notifOn, disabled:true }
-    : notifStatus==='denied'
-    ? { bg:'#fef2f2', color:'#dc2626', label:'✕ '+t.notifBlocked, disabled:true }
-    : { bg:'#fafaf9', color:'#374151', label:'🔔 '+t.notifOff, disabled:false }
+  const totalUnread = Object.values(chatUnread).reduce((a,b)=>a+b,0) + notifications.filter(n=>!n.read).length
 
   const TaskRow = ({ task, isArchived=false, index=0 }) => {
-    const baseBg = index % 2 === 0 ? '#ffffff' : '#f7f7f5'
+    const baseBg = highlightedTaskId === task.id ? '#fffbeb' : (index % 2 === 0 ? '#ffffff' : '#f7f7f5')
+    const assignedUsersList = [...new Set([
+      ...(task.assigned_users || []),
+      ...(task.assigned_to ? [task.assigned_to] : [])
+    ])]
+    const assignedProfiles = users.filter(u => assignedUsersList.includes(u.id))
+
     return (
-    <div onClick={()=>openPreview(task)}
-      style={{...S.row, gridTemplateColumns:cols, opacity:isArchived?0.65:1, background:baseBg}}
-      onMouseEnter={e=>e.currentTarget.style.background='#eef2ff'}
-      onMouseLeave={e=>e.currentTarget.style.background=baseBg}>
-      <div>
-        <div style={{fontSize:'12px', fontWeight:'500', color:'#2563eb', fontFamily:"'DM Mono', monospace", letterSpacing:'-0.3px'}}>{task.order_number||'—'}</div>
-        <div style={{fontSize:'10px', color:'#9ca3af', marginTop:'1px'}}>{task.claim_number||''}</div>
+      <div onClick={()=>openPreview(task)}
+        style={{...S.row, gridTemplateColumns:cols, opacity:isArchived?0.65:1, background:baseBg, transition:'background 0.5s'}}
+        onMouseEnter={e=>{ if(highlightedTaskId !== task.id) e.currentTarget.style.background='#eef2ff' }}
+        onMouseLeave={e=>{ e.currentTarget.style.background=baseBg }}>
+        <div>
+          <div style={{fontSize:'12px', fontWeight:'500', color:'#2563eb', fontFamily:"'DM Mono', monospace", letterSpacing:'-0.3px'}}>{task.order_number||'—'}</div>
+          <div style={{fontSize:'10px', color:'#9ca3af', marginTop:'1px'}}>{task.claim_number||''}</div>
+        </div>
+        <div>
+          <div style={{fontSize:'13px', fontWeight:'500', color:'#111', letterSpacing:'-0.1px'}}>{task.product_name}</div>
+          <div style={{fontSize:'12px', color:'#9ca3af', marginTop:'2px'}}>{task.client_name}{task.category?' · '+task.category:''}</div>
+        </div>
+        <div style={{fontSize:'12px', color:'#6b7280'}}>{task.marketplace||'—'}</div>
+        <div onClick={e=>e.stopPropagation()}>
+          {isArchived
+            ? <span style={S.pill('done')}>{statusLabel('done')}</span>
+            : <select value={task.status} onChange={e=>{e.stopPropagation();changeStatus(task.id,e.target.value,task)}}
+                style={{...S.pill(task.status), border:'none', cursor:'pointer', outline:'none', appearance:'none', paddingRight:'6px', fontFamily:"'DM Sans', sans-serif"}}>
+                {Object.keys(STATUS_META).map(k=><option key={k} value={k}>{statusLabel(k)}</option>)}
+              </select>
+          }
+        </div>
+        {/* Multiple assignees display */}
+        <div style={{display:'flex', alignItems:'center', gap:'3px', flexWrap:'wrap'}}>
+          {assignedProfiles.length === 0 && <span style={{color:'#d1d5db', fontSize:'12px'}}>—</span>}
+          {assignedProfiles.slice(0,3).map(u => (
+            <div key={u.id} title={u.full_name} style={{width:'22px',height:'22px',borderRadius:'50%',background:'#eff6ff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'8px',fontWeight:'600',color:'#2563eb',flexShrink:0,border:'1px solid #bfdbfe'}}>
+              {initials(u.full_name)}
+            </div>
+          ))}
+          {assignedProfiles.length > 3 && <span style={{fontSize:'10px',color:'#9ca3af'}}>+{assignedProfiles.length-3}</span>}
+        </div>
+        <div style={{display:'flex', alignItems:'center', gap:'5px'}}>
+          <span style={{width:'7px',height:'7px',borderRadius:'50%',background:PRIO_DOT[task.priority],flexShrink:0,display:'inline-block'}}></span>
+          <span style={{fontSize:'11px',color:'#9ca3af'}}>{task.priority==='high'?t.high:task.priority==='med'?t.med:t.low}</span>
+        </div>
+        <div>
+          {task.deadline
+            ? <span style={{fontSize:'11px',fontWeight:'500',color:isOverdue(task)?'#dc2626':'#374151',background:isOverdue(task)?'#fef2f2':'transparent',padding:isOverdue(task)?'2px 6px':'0',borderRadius:'5px'}}>{fmtDate(task.deadline)}</span>
+            : <span style={{color:'#d1d5db',fontSize:'11px'}}>—</span>}
+        </div>
+        {!isArchived
+          ? <div style={{display:'flex',gap:'4px'}} onClick={e=>e.stopPropagation()}>
+              <button onClick={()=>openDetail(task)} style={S.btnSm('green')}>{t.files}</button>
+              <button onClick={()=>openEdit(task)} style={S.btnSm()}>{t.edit}</button>
+              {availWS.length>0&&<button onClick={()=>openMove(task)} style={S.btnSm('indigo')}>{t.move}</button>}
+              <button onClick={()=>deleteTask(task.id)} style={S.btnSm('red')}>{t.del}</button>
+            </div>
+          : <div style={{fontSize:'11px',color:'#9ca3af',fontStyle:'italic'}}>Archiwum</div>}
       </div>
-      <div>
-        <div style={{fontSize:'13px', fontWeight:'500', color:'#111', letterSpacing:'-0.1px'}}>{task.product_name}</div>
-        <div style={{fontSize:'12px', color:'#9ca3af', marginTop:'2px'}}>{task.client_name}{task.category?' · '+task.category:''}</div>
-      </div>
-      <div style={{fontSize:'12px', color:'#6b7280'}}>{task.marketplace||'—'}</div>
-      <div onClick={e=>e.stopPropagation()}>
-        {isArchived
-          ? <span style={S.pill('done')}>{statusLabel('done')}</span>
-          : <select value={task.status} onChange={e=>{e.stopPropagation();changeStatus(task.id,e.target.value)}}
-              style={{...S.pill(task.status), border:'none', cursor:'pointer', outline:'none', appearance:'none', paddingRight:'6px', fontFamily:"'DM Sans', sans-serif"}}>
-              {Object.keys(STATUS_META).map(k=><option key={k} value={k}>{statusLabel(k)}</option>)}
-            </select>
-        }
-      </div>
-      <div style={{fontSize:'12px', color:'#6b7280', display:'flex', alignItems:'center', gap:'5px'}}>
-        {task.assigned_profile?.full_name
-          ? <><div style={{width:'20px',height:'20px',borderRadius:'50%',background:'#eff6ff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'8px',fontWeight:'600',color:'#2563eb',flexShrink:0,letterSpacing:'0'}}>{initials(task.assigned_profile.full_name)}</div><span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontSize:'12px'}}>{task.assigned_profile.full_name}</span></>
-          : <span style={{color:'#d1d5db'}}>—</span>}
-      </div>
-      <div style={{display:'flex', alignItems:'center', gap:'5px'}}>
-        <span style={{width:'7px',height:'7px',borderRadius:'50%',background:PRIO_DOT[task.priority],flexShrink:0,display:'inline-block'}}></span>
-        <span style={{fontSize:'11px',color:'#9ca3af'}}>{task.priority==='high'?t.high:task.priority==='med'?t.med:t.low}</span>
-      </div>
-      <div>
-        {task.deadline
-          ? <span style={{fontSize:'11px',fontWeight:'500',color:isOverdue(task)?'#dc2626':'#374151',background:isOverdue(task)?'#fef2f2':'transparent',padding:isOverdue(task)?'2px 6px':'0',borderRadius:'5px'}}>{fmtDate(task.deadline)}</span>
-          : <span style={{color:'#d1d5db',fontSize:'11px'}}>—</span>}
-      </div>
-      {!isArchived
-        ? <div style={{display:'flex',gap:'4px'}} onClick={e=>e.stopPropagation()}>
-            <button onClick={()=>openDetail(task)} style={S.btnSm('green')}>{t.files}</button>
-            <button onClick={()=>openEdit(task)} style={S.btnSm()}>{t.edit}</button>
-            {availWS.length>0&&<button onClick={()=>openMove(task)} style={S.btnSm('indigo')}>{t.move}</button>}
-            <button onClick={()=>deleteTask(task.id)} style={S.btnSm('red')}>{t.del}</button>
-          </div>
-        : <div style={{fontSize:'11px',color:'#9ca3af',fontStyle:'italic'}}>Archiwum</div>}
-    </div>
-  )}
-
-
+    )
+  }
 
   return (
     <div style={{display:'flex',height:'100vh',fontFamily:"'DM Sans', -apple-system, sans-serif",fontSize:'14px'}}>
@@ -498,7 +859,6 @@ export default function Dashboard() {
         <div style={S.sidebarBottom}>
           <div style={{fontSize:'13px',fontWeight:'500',color:'#111',marginBottom:'2px',letterSpacing:'-0.1px'}}>{profile?.full_name||user?.email?.split('@')[0]}</div>
           <div style={{fontSize:'11px',color:'#9ca3af',marginBottom:'10px'}}>{profile?.role==='admin'?t.admin:t.user}</div>
-
           <button onClick={()=>router.push('/messages')} style={{display:'block',fontSize:'11px',color:'#2563eb',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>
             {lang==='pl'?'Wiadomosci':'Messages'}
           </button>
@@ -511,78 +871,89 @@ export default function Dashboard() {
 
       {/* MAIN */}
       <div style={{flex:1,display:'flex',overflow:'hidden'}}>
-      <div style={{...S.main,flex:1}}>
-        {showTimeoutWarning&&(
-          <div style={{background:'#fffbeb',borderBottom:'1px solid #fde68a',padding:'6px 24px',fontSize:'12px',color:'#92400e',display:'flex',alignItems:'center',gap:'8px'}}>
-            <span>⚠️</span>
-            <span>Sesja wygasnie za 30 minut z powodu braku aktywnosci.</span>
-            <button onClick={()=>{setShowTimeoutWarning(false);supabase.auth.getSession()}} style={{marginLeft:'auto',fontSize:'11px',padding:'3px 10px',background:'#92400e',color:'white',border:'none',borderRadius:'5px',cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}}>
-              Przedluz sesje
+        <div style={{...S.main,flex:1}}>
+          {showTimeoutWarning&&(
+            <div style={{background:'#fffbeb',borderBottom:'1px solid #fde68a',padding:'6px 24px',fontSize:'12px',color:'#92400e',display:'flex',alignItems:'center',gap:'8px'}}>
+              <span>⚠️</span>
+              <span>Sesja wygasnie za 30 minut z powodu braku aktywnosci.</span>
+              <button onClick={()=>{setShowTimeoutWarning(false);supabase.auth.getSession()}} style={{marginLeft:'auto',fontSize:'11px',padding:'3px 10px',background:'#92400e',color:'white',border:'none',borderRadius:'5px',cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}}>
+                Przedluz sesje
+              </button>
+            </div>
+          )}
+          <div style={S.liveBanner}>
+            <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'#16a34a',display:'inline-block'}}></span>
+            {t.live}
+          </div>
+
+          <div style={S.topbar}>
+            <span style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.3px',color:'#111'}}>
+              {WORKSPACES.find(w=>w.key===workspace)?.label}
+              {showArchive&&<span style={{fontSize:'13px',color:'#9ca3af',fontWeight:'400',marginLeft:'8px'}}>· {t.archive}</span>}
+            </span>
+            <button onClick={()=>router.push('/crm')} style={{display:'flex',alignItems:'center',gap:'6px',padding:'6px 13px',borderRadius:'8px',border:'1px solid #e9d5ff',background:'#f5f3ff',color:'#6d28d9',fontSize:'13px',fontWeight:'500',cursor:'pointer',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3h10M2 7h6M2 11h8" stroke="#6d28d9" strokeWidth="1.3" strokeLinecap="round"/></svg>
+              CRM
+            </button>
+            <span style={{flex:1}}/>
+            {!showArchive&&<input value={search} onChange={e=>setSearch(e.target.value)} placeholder={t.search} style={S.searchInput} />}
+            {!showArchive&&<button onClick={openNew} style={S.btnPrimary}>{t.newTask}</button>}
+
+            {/* NOTIFICATION BELL */}
+            <NotificationBell
+              notifications={notifications}
+              onMarkRead={markNotifRead}
+              onMarkAllRead={markAllNotifsRead}
+              onClickNotif={handleClickNotif}
+            />
+
+            {/* CHAT BUTTON */}
+            <button onClick={()=>setShowChat(v=>!v)} style={{position:'relative',display:'flex',alignItems:'center',gap:'6px',padding:'7px 13px',background:showChat?'#111':'#fff',color:showChat?'white':'#374151',border:'1px solid #e8e8e6',borderRadius:'8px',cursor:'pointer',fontSize:'13px',fontWeight:'500',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7c0 2.8-2.2 5-5 5l-3 1.5.5-2C3 10.4 2 8.8 2 7c0-2.8 2.2-5 5-5s5 2.2 5 5z" stroke={showChat?'white':'#374151'} strokeWidth="1.3" strokeLinejoin="round"/></svg>
+              Czat
+              {totalUnread > 0 && <span style={{position:'absolute',top:'-5px',right:'-5px',width:'16px',height:'16px',background:'#2563eb',color:'white',borderRadius:'50%',fontSize:'9px',fontWeight:'700',display:'flex',alignItems:'center',justifyContent:'center'}}>{totalUnread > 9 ? '9+' : totalUnread}</span>}
             </button>
           </div>
-        )}
-        <div style={S.liveBanner}>
-          <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'#16a34a',display:'inline-block'}}></span>
-          {t.live}
-        </div>
 
-        <div style={S.topbar}>
-          <span style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.3px',color:'#111'}}>
-            {WORKSPACES.find(w=>w.key===workspace)?.label}
-            {showArchive&&<span style={{fontSize:'13px',color:'#9ca3af',fontWeight:'400',marginLeft:'8px'}}>· {t.archive}</span>}
-          </span>
-          <button onClick={()=>router.push('/crm')} style={{display:'flex',alignItems:'center',gap:'6px',padding:'6px 13px',borderRadius:'8px',border:'1px solid #e9d5ff',background:'#f5f3ff',color:'#6d28d9',fontSize:'13px',fontWeight:'500',cursor:'pointer',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3h10M2 7h6M2 11h8" stroke="#6d28d9" strokeWidth="1.3" strokeLinecap="round"/></svg>
-            CRM
-          </button>
-          <span style={{flex:1}}/>
-          {!showArchive&&<input value={search} onChange={e=>setSearch(e.target.value)} placeholder={t.search} style={S.searchInput} />}
-          {!showArchive&&<button onClick={openNew} style={S.btnPrimary}>{t.newTask}</button>}
-          <button onClick={()=>setShowChat(v=>!v)} style={{position:'relative',display:'flex',alignItems:'center',gap:'6px',padding:'7px 13px',background:showChat?'#111':'#fff',color:showChat?'white':'#374151',border:'1px solid #e8e8e6',borderRadius:'8px',cursor:'pointer',fontSize:'13px',fontWeight:'500',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7c0 2.8-2.2 5-5 5l-3 1.5.5-2C3 10.4 2 8.8 2 7c0-2.8 2.2-5 5-5s5 2.2 5 5z" stroke={showChat?'white':'#374151'} strokeWidth="1.3" strokeLinejoin="round"/></svg>
-            Czat
-            {Object.values(chatUnread).reduce((a,b)=>a+b,0)>0&&<span style={{position:'absolute',top:'-5px',right:'-5px',width:'16px',height:'16px',background:'#2563eb',color:'white',borderRadius:'50%',fontSize:'9px',fontWeight:'700',display:'flex',alignItems:'center',justifyContent:'center'}}>{Object.values(chatUnread).reduce((a,b)=>a+b,0)}</span>}
-          </button>
-        </div>
-
-        {!showArchive&&(
-          <div style={S.statsGrid}>
-            {[
-              {label:t.all, val:counts.all, color:'#111', action:()=>{setFilter('all');setShowArchive(false)}},
-              {label:t.mine, val:counts.mine, color:'#2563eb', action:()=>{setFilter('mine');setShowArchive(false)}},
-              {label:t.urgent, val:counts.urgent, color:'#dc2626', action:()=>{setFilter('urgent');setShowArchive(false)}},
-              {label:t.archive, val:counts.archive, color:'#9ca3af', action:()=>{setShowArchive(true);setFilter('all')}},
-            ].map(s=>{
-              const filterKey = s.label===t.all?'all':s.label===t.mine?'mine':s.label===t.urgent?'urgent':'archive'
-              const isActive = filterKey==='archive' ? showArchive : (filter===filterKey && !showArchive)
-              return (
-              <div key={s.label} onClick={s.action} style={{...S.statCard, cursor:'pointer', border: isActive?'2px solid '+s.color:'1px solid #e8e8e6', transition:'all 0.15s'}}
-                onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';e.currentTarget.style.transform='translateY(-1px)'}}
-                onMouseLeave={e=>{e.currentTarget.style.boxShadow='none';e.currentTarget.style.transform='translateY(0)'}}>
-                <div style={{fontSize:'10px',color:'#9ca3af',marginBottom:'6px',fontWeight:'500',letterSpacing:'0.06em',textTransform:'uppercase'}}>{s.label}</div>
-                <div style={{fontSize:'28px',fontWeight:'600',color:s.color,letterSpacing:'-0.5px',lineHeight:'1'}}>{s.val}</div>
-              </div>
-            )})}
-          </div>
-        )}
-
-        <div style={{flex:1,overflow:'auto',padding:'14px 24px 24px'}}>
-          <div style={S.tableWrap}>
-            {showArchive&&<div style={{padding:'12px 20px',borderBottom:'1px solid #e8e8e6',background:'#fafaf9',display:'flex',alignItems:'center',gap:'8px'}}><span style={{fontSize:'13px',fontWeight:'500',color:'#6b7280'}}>📦 {t.archive}</span><span style={{fontSize:'12px',color:'#9ca3af'}}>— {t.archiveNote}</span></div>}
-            <div style={{display:'grid',gridTemplateColumns:cols,padding:'10px 16px',borderBottom:'1px solid #e8e8e6',background:'#fafaf9'}}>
-              {[t.col1,t.col2,t.col3,t.col4,t.col5,t.col6,t.col7,showArchive?'':t.col8].map((h,i)=>(
-                <span key={i} style={S.th}>{h}</span>
-              ))}
+          {!showArchive&&(
+            <div style={S.statsGrid}>
+              {[
+                {label:t.all, val:counts.all, color:'#111', action:()=>{setFilter('all');setShowArchive(false)}},
+                {label:t.mine, val:counts.mine, color:'#2563eb', action:()=>{setFilter('mine');setShowArchive(false)}},
+                {label:t.urgent, val:counts.urgent, color:'#dc2626', action:()=>{setFilter('urgent');setShowArchive(false)}},
+                {label:t.archive, val:counts.archive, color:'#9ca3af', action:()=>{setShowArchive(true);setFilter('all')}},
+              ].map(s=>{
+                const filterKey = s.label===t.all?'all':s.label===t.mine?'mine':s.label===t.urgent?'urgent':'archive'
+                const isActive = filterKey==='archive' ? showArchive : (filter===filterKey && !showArchive)
+                return (
+                  <div key={s.label} onClick={s.action} style={{...S.statCard, cursor:'pointer', border: isActive?'2px solid '+s.color:'1px solid #e8e8e6', transition:'all 0.15s'}}
+                    onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';e.currentTarget.style.transform='translateY(-1px)'}}
+                    onMouseLeave={e=>{e.currentTarget.style.boxShadow='none';e.currentTarget.style.transform='translateY(0)'}}>
+                    <div style={{fontSize:'10px',color:'#9ca3af',marginBottom:'6px',fontWeight:'500',letterSpacing:'0.06em',textTransform:'uppercase'}}>{s.label}</div>
+                    <div style={{fontSize:'28px',fontWeight:'600',color:s.color,letterSpacing:'-0.5px',lineHeight:'1'}}>{s.val}</div>
+                  </div>
+                )
+              })}
             </div>
-            {showArchive
-              ? archived.length===0?<div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>{t.noArchive}</div>:archived.map((task,i)=><TaskRow key={task.id} task={task} isArchived={true} index={i}/>)
-              : filtered.length===0?<div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>{t.noTasks}</div>:filtered.map((task,i)=><TaskRow key={task.id} task={task} index={i}/>)
-            }
+          )}
+
+          <div style={{flex:1,overflow:'auto',padding:'14px 24px 24px'}}>
+            <div style={S.tableWrap}>
+              {showArchive&&<div style={{padding:'12px 20px',borderBottom:'1px solid #e8e8e6',background:'#fafaf9',display:'flex',alignItems:'center',gap:'8px'}}><span style={{fontSize:'13px',fontWeight:'500',color:'#6b7280'}}>📦 {t.archive}</span><span style={{fontSize:'12px',color:'#9ca3af'}}>— {t.archiveNote}</span></div>}
+              <div style={{display:'grid',gridTemplateColumns:cols,padding:'10px 16px',borderBottom:'1px solid #e8e8e6',background:'#fafaf9'}}>
+                {[t.col1,t.col2,t.col3,t.col4,t.col5,t.col6,t.col7,showArchive?'':t.col8].map((h,i)=>(
+                  <span key={i} style={S.th}>{h}</span>
+                ))}
+              </div>
+              {showArchive
+                ? archived.length===0?<div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>{t.noArchive}</div>:archived.map((task,i)=><TaskRow key={task.id} task={task} isArchived={true} index={i}/>)
+                : filtered.length===0?<div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>{t.noTasks}</div>:filtered.map((task,i)=><TaskRow key={task.id} task={task} index={i}/>)
+              }
+            </div>
           </div>
         </div>
       </div>
 
-      </div>
       {showChat&&<ChatPanel
         user={user} profile={profile} lang={lang}
         chatUsers={chatUsers} chatSelected={chatSelected} setChatSelected={setChatSelected}
@@ -600,7 +971,7 @@ export default function Dashboard() {
       {/* PREVIEW MODAL */}
       {showPreview&&selectedTask&&(
         <div style={S.modalOverlay}>
-          <div style={S.modal('600px')}>
+          <div style={S.modal('620px')}>
             <div style={S.modalHeader}>
               <div>
                 <div style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.2px',color:'#111'}}>{selectedTask.product_name}</div>
@@ -616,7 +987,13 @@ export default function Dashboard() {
                 {[
                   {label:t.col4, val:<span style={S.pill(selectedTask.status)}>{statusLabel(selectedTask.status)}</span>},
                   {label:t.col6, val:<span style={{display:'flex',alignItems:'center',gap:'5px'}}><span style={{width:'8px',height:'8px',borderRadius:'50%',background:PRIO_DOT[selectedTask.priority],display:'inline-block'}}></span>{selectedTask.priority==='high'?t.high:selectedTask.priority==='med'?t.med:t.low}</span>},
-                  {label:t.col5, val:selectedTask.assigned_profile?.full_name||'—'},
+                  {label:t.assignedTo, val: (() => {
+                    const assignedUsersList = [...new Set([...(selectedTask.assigned_users||[]), ...(selectedTask.assigned_to?[selectedTask.assigned_to]:[])])]
+                    const assignedProfiles = users.filter(u => assignedUsersList.includes(u.id))
+                    return assignedProfiles.length > 0
+                      ? <div style={{display:'flex',gap:'4px',flexWrap:'wrap'}}>{assignedProfiles.map(u=><span key={u.id} style={{background:'#eff6ff',color:'#1d4ed8',fontSize:'11px',padding:'2px 8px',borderRadius:'20px',fontWeight:'500'}}>{u.full_name}</span>)}</div>
+                      : '—'
+                  })()},
                   {label:t.col7, val:selectedTask.deadline?fmtDate(selectedTask.deadline):'—'},
                   {label:t.col3, val:selectedTask.marketplace||'—'},
                   {label:'SKU', val:selectedTask.sku||'—'},
@@ -655,9 +1032,15 @@ export default function Dashboard() {
                     <div style={{fontSize:'13px',color:'#111',lineHeight:'1.5',paddingLeft:'29px'}}>{c.content}</div>
                   </div>
                 ))}
+                {/* Add comment in preview */}
+                <div style={{display:'flex',gap:'8px',marginTop:'10px'}}>
+                  <input value={newComment} onChange={e=>setNewComment(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&sendComment()} placeholder={t.addComment} style={{...S.input, flex:1}} />
+                  <button onClick={sendComment} disabled={sendingCmt||!newComment.trim()} style={{...S.btnPrimary, opacity:(!newComment.trim()||sendingCmt)?0.5:1}}>{t.send}</button>
+                </div>
               </div>
             </div>
             <div style={S.modalFooter}>
+              {!showArchive&&<button onClick={()=>{setShowPreview(false);openDetail(selectedTask)}} style={{...S.btnSm('green'), padding:'8px 14px', fontSize:'13px'}}>📎 {t.files}</button>}
               {!showArchive&&<button onClick={()=>{setShowPreview(false);openEdit(selectedTask)}} style={S.btnPrimary}>{t.edit}</button>}
               <button onClick={()=>setShowPreview(false)} style={{...S.btnSm(), padding:'8px 16px', fontSize:'13px'}}>{t.cancel}</button>
             </div>
@@ -787,13 +1170,18 @@ export default function Dashboard() {
                   </select>
                 </FormField>
               </div>
-              <div style={S.grid2}>
-                <FormField label={t.f_assign}>
-                  <select value={form.assigned_to} onChange={e=>setForm({...form,assigned_to:e.target.value})} style={S.select}>
-                    <option value="">{t.f_none}</option>
-                    {users.map(u=><option key={u.id} value={u.id}>{u.full_name||u.id}</option>)}
-                  </select>
+              {/* MULTI-SELECT ASSIGNEES */}
+              <div style={{marginBottom:'12px'}}>
+                <FormField label={`${t.f_assign} (mozna wybrac wiele osob)`}>
+                  <UserMultiSelect
+                    users={users}
+                    selected={[...new Set([...(form.assigned_users||[]), ...(form.assigned_to?[form.assigned_to]:[])])]}
+                    onChange={(ids) => setForm({...form, assigned_users: ids, assigned_to: ids[0] || ''})}
+                    placeholder="— Wybierz osoby —"
+                  />
                 </FormField>
+              </div>
+              <div style={{marginBottom:'12px'}}>
                 <FormField label={t.f_deadline}><input type="date" value={form.deadline} onChange={e=>setForm({...form,deadline:e.target.value})} style={S.input} /></FormField>
               </div>
               {crmClients.length>0&&(
@@ -806,8 +1194,6 @@ export default function Dashboard() {
                   </FormField>
                 </div>
               )}
-              <div style={{display:'none'}}>
-              </div>
               <FormField label={t.f_desc}>
                 <textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder={t.f_desc} style={{...S.input, height:'72px', resize:'vertical'}} />
               </FormField>
