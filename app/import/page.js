@@ -1,24 +1,22 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useRouter } from 'next/navigation'
 
 const ADMIN_ID = 'd53f6727-6bc7-4602-9ce0-4fc31ab3aba1'
+const F = { fontFamily:"'DM Sans',-apple-system,sans-serif" }
 
 export default function ImportPage() {
   const router = useRouter()
   const [user, setUser] = useState(null)
-  const [status, setStatus] = useState('idle') // idle, loading, running, done, error
+  const [status, setStatus] = useState('idle')
   const [progress, setProgress] = useState({ current: 0, total: 0, created: 0, updated: 0, errors: 0 })
   const [log, setLog] = useState([])
   const [clientsData, setClientsData] = useState(null)
   const fileRef = useRef(null)
+  const logRef = useRef(null)
 
-  const addLog = (msg, type = 'info') => {
-    setLog(prev => [...prev, { msg, type, time: new Date().toLocaleTimeString('pl-PL') }])
-  }
-
-  useState(() => {
+  useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user || user.id !== ADMIN_ID) {
         router.push('/dashboard')
@@ -26,7 +24,15 @@ export default function ImportPage() {
       }
       setUser(user)
     })
-  })
+  }, [])
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [log])
+
+  const addLog = (msg, type = 'info') => {
+    setLog(prev => [...prev, { msg, type, time: new Date().toLocaleTimeString('pl-PL') }])
+  }
 
   async function handleFileLoad(e) {
     const file = e.target.files[0]
@@ -38,9 +44,7 @@ export default function ImportPage() {
       const data = JSON.parse(text)
       setClientsData(data)
       setStatus('ready')
-      addLog(`✅ Plik wczytany — ${data.length} klientów gotowych do importu`, 'success')
-
-      // Stats
+      addLog(`✅ Plik wczytany — ${data.length} klientów`, 'success')
       const b2b = data.filter(c => c.segment === 'b2b').length
       const b2c = data.filter(c => c.segment === 'b2c').length
       const vip = data.filter(c => c.is_vip).length
@@ -48,87 +52,131 @@ export default function ImportPage() {
       addLog(`📊 B2B: ${b2b} | B2C: ${b2c} | VIP: ${vip} | Aktywni: ${active}`, 'info')
     } catch (err) {
       setStatus('error')
-      addLog(`❌ Błąd wczytywania pliku: ${err.message}`, 'error')
+      addLog(`❌ Błąd: ${err.message}`, 'error')
     }
   }
 
   async function runImport(clearFirst = false) {
-    if (!clientsData || !user) return
+    if (!clientsData) return
     setStatus('running')
     setProgress({ current: 0, total: clientsData.length, created: 0, updated: 0, errors: 0 })
 
-    // Get session token
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      addLog('❌ Brak sesji — zaloguj się ponownie', 'error')
-      setStatus('error')
-      return
+    addLog(`🚀 Rozpoczynam import ${clientsData.length} klientów...`, 'info')
+
+    // Clear first if needed
+    if (clearFirst) {
+      addLog('🗑 Czyszczenie istniejących klientów...', 'info')
+      try {
+        // Delete interactions first
+        const { data: existingClients } = await supabase.from('clients').select('id')
+        if (existingClients && existingClients.length > 0) {
+          const ids = existingClients.map(c => c.id)
+          // Delete in chunks
+          for (let i = 0; i < ids.length; i += 100) {
+            await supabase.from('client_interactions').delete().in('client_id', ids.slice(i, i + 100))
+          }
+          await supabase.from('clients').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+        }
+        addLog(`✅ Wyczyszczono ${existingClients?.length || 0} klientów`, 'success')
+      } catch (err) {
+        addLog(`⚠️ Błąd czyszczenia: ${err.message}`, 'error')
+      }
     }
 
-    addLog(`🚀 Rozpoczynam import ${clientsData.length} klientów...`, 'info')
-    if (clearFirst) addLog('🗑 Czyszczenie istniejących klientów...', 'info')
-
-    // Send in batches of 200
-    const batchSize = 200
     let totalCreated = 0
     let totalUpdated = 0
     let totalErrors = 0
+    const batchSize = 50
 
     for (let i = 0; i < clientsData.length; i += batchSize) {
       const batch = clientsData.slice(i, i + batchSize)
       const batchNum = Math.floor(i / batchSize) + 1
       const totalBatches = Math.ceil(clientsData.length / batchSize)
 
-      try {
-        const res = await fetch('/api/import-clients', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${session.access_token}`
-          },
-          body: JSON.stringify({
-            clients: batch,
-            clear_first: clearFirst && i === 0 // only clear on first batch
-          })
-        })
+      let batchCreated = 0
+      let batchUpdated = 0
+      let batchErrors = 0
 
-        const result = await res.json()
+      for (const c of batch) {
+        try {
+          // Check if exists by email
+          const { data: existing } = await supabase
+            .from('clients')
+            .select('id')
+            .eq('email', c.email)
+            .maybeSingle()
 
-        if (result.error) {
-          addLog(`❌ Batch ${batchNum}/${totalBatches}: ${result.error}`, 'error')
-          totalErrors += batch.length
-        } else {
-          totalCreated += result.created || 0
-          totalUpdated += result.updated || 0
-          totalErrors += result.errors || 0
-          addLog(`✅ Batch ${batchNum}/${totalBatches}: +${result.created} nowych, ~${result.updated} zaktualizowanych`, 'success')
+          if (existing) {
+            // Update
+            await supabase.from('clients').update({
+              ltv: c.ltv,
+              last_order_date: c.last_order_date,
+              last_contact_date: c.last_order_date,
+              is_vip: c.is_vip,
+              status: c.status,
+              notes: c.notes,
+              company_name: c.company_name || null,
+              phone: c.phone || null,
+            }).eq('id', existing.id)
+            batchUpdated++
+          } else {
+            // Insert new
+            const { data: newClient, error } = await supabase.from('clients').insert({
+              contact_name: c.contact_name || c.email.split('@')[0],
+              company_name: c.company_name || null,
+              email: c.email,
+              phone: c.phone || null,
+              segment: c.segment,
+              workspace: 'jamo_healthy',
+              status: c.status,
+              source: 'baselinker_import',
+              marketplace: c.segment === 'b2b' ? 'shopify' : 'woocommerce',
+              ltv: c.ltv,
+              last_order_date: c.last_order_date,
+              last_contact_date: c.last_order_date,
+              is_vip: c.is_vip,
+              notes: c.notes,
+            }).select().single()
+
+            if (error) {
+              batchErrors++
+            } else if (newClient) {
+              // Add interaction
+              await supabase.from('client_interactions').insert({
+                client_id: newClient.id,
+                type: 'order',
+                content: `Import BaseLinker — ${c.order_count} zamówień, LTV: £${c.ltv}. Pierwszy: ${c.first_order_date}. Ostatni: ${c.last_order_date}.${c.avg_days_between_orders ? ` Śr. co ${c.avg_days_between_orders} dni.` : ''}`,
+              })
+              batchCreated++
+            }
+          }
+        } catch (err) {
+          batchErrors++
         }
-
-        setProgress({
-          current: Math.min(i + batchSize, clientsData.length),
-          total: clientsData.length,
-          created: totalCreated,
-          updated: totalUpdated,
-          errors: totalErrors
-        })
-
-      } catch (err) {
-        addLog(`❌ Batch ${batchNum}/${totalBatches}: ${err.message}`, 'error')
-        totalErrors += batch.length
       }
+
+      totalCreated += batchCreated
+      totalUpdated += batchUpdated
+      totalErrors += batchErrors
+
+      const current = Math.min(i + batchSize, clientsData.length)
+      setProgress({ current, total: clientsData.length, created: totalCreated, updated: totalUpdated, errors: totalErrors })
+
+      if (batchNum % 5 === 0 || batchNum === totalBatches) {
+        addLog(`✅ Batch ${batchNum}/${totalBatches} — +${batchCreated} nowych, ~${batchUpdated} zaktualizowanych`, 'success')
+      }
+
+      // Small delay to prevent rate limiting
+      await new Promise(r => setTimeout(r, 100))
     }
 
-    addLog(`\n🎉 Import zakończony!`, 'success')
-    addLog(`📊 Utworzono: ${totalCreated} | Zaktualizowano: ${totalUpdated} | Błędy: ${totalErrors}`, 'info')
+    addLog(`🎉 Import zakończony!`, 'success')
+    addLog(`📊 Nowi: ${totalCreated} | Zaktualizowani: ${totalUpdated} | Błędy: ${totalErrors}`, 'info')
     setStatus('done')
-    setProgress(prev => ({ ...prev, created: totalCreated, updated: totalUpdated, errors: totalErrors }))
   }
-
-  const F = { fontFamily:"'DM Sans',-apple-system,sans-serif" }
 
   return (
     <div style={{ minHeight:'100vh', background:'#f5f5f3', ...F, fontSize:'14px' }}>
-      {/* Topbar */}
       <div style={{ background:'#fff', borderBottom:'1px solid #e8e8e6', padding:'0 32px', height:'56px', display:'flex', alignItems:'center', gap:'12px' }}>
         <button onClick={() => router.push('/dashboard')} style={{ border:'none', background:'none', cursor:'pointer', color:'#9ca3af', fontSize:'20px' }}>←</button>
         <span style={{ fontSize:'15px', fontWeight:'600', color:'#111' }}>Import klientów z BaseLinker</span>
@@ -137,57 +185,43 @@ export default function ImportPage() {
 
       <div style={{ maxWidth:'800px', margin:'0 auto', padding:'32px 24px' }}>
 
-        {/* Step 1 - Load file */}
+        {/* Step 1 */}
         <div style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'12px', padding:'24px', marginBottom:'16px' }}>
           <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px' }}>
             <div style={{ width:'28px', height:'28px', background:'#111', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'13px', fontWeight:'600' }}>1</div>
             <span style={{ fontSize:'15px', fontWeight:'600', color:'#111' }}>Wczytaj plik clients_import.json</span>
           </div>
-          <p style={{ fontSize:'13px', color:'#6b7280', marginBottom:'16px' }}>
-            Pobierz plik <code style={{ background:'#f4f4f3', padding:'2px 6px', borderRadius:'4px', fontSize:'12px' }}>clients_import.json</code> z poprzedniej wiadomości Claude i wgraj go tutaj.
-          </p>
           <input ref={fileRef} type="file" accept=".json" style={{ display:'none' }} onChange={handleFileLoad} />
           <button onClick={() => fileRef.current?.click()}
             style={{ padding:'10px 20px', background:'#111', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'500', cursor:'pointer', ...F }}>
             📁 Wybierz plik JSON
           </button>
-          {status === 'ready' && (
-            <span style={{ marginLeft:'12px', color:'#16a34a', fontSize:'13px', fontWeight:'500' }}>✓ Plik wczytany</span>
+          {status !== 'idle' && status !== 'loading' && (
+            <span style={{ marginLeft:'12px', color:'#16a34a', fontSize:'13px', fontWeight:'500' }}>✓ {clientsData?.length} klientów wczytanych</span>
           )}
         </div>
 
-        {/* Step 2 - Import options */}
-        {(status === 'ready' || status === 'running' || status === 'done') && (
+        {/* Step 2 */}
+        {['ready','running','done'].includes(status) && (
           <div style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'12px', padding:'24px', marginBottom:'16px' }}>
             <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'16px' }}>
               <div style={{ width:'28px', height:'28px', background:'#111', borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'13px', fontWeight:'600' }}>2</div>
               <span style={{ fontSize:'15px', fontWeight:'600', color:'#111' }}>Wybierz opcję importu</span>
             </div>
-
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'16px' }}>
-              {/* Option A - Add/Update */}
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
               <div style={{ padding:'16px', border:'1px solid #e8e8e6', borderRadius:'10px', background:'#fafaf9' }}>
                 <div style={{ fontSize:'13px', fontWeight:'600', color:'#111', marginBottom:'6px' }}>➕ Dodaj / Zaktualizuj</div>
-                <div style={{ fontSize:'12px', color:'#6b7280', marginBottom:'12px' }}>
-                  Dodaje nowych klientów i aktualizuje istniejących (po emailu). Bezpieczna opcja.
-                </div>
+                <div style={{ fontSize:'12px', color:'#6b7280', marginBottom:'12px' }}>Bezpieczna opcja — dodaje nowych i aktualizuje istniejących po emailu.</div>
                 <button onClick={() => runImport(false)} disabled={status === 'running'}
                   style={{ width:'100%', padding:'9px', background:'#111', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'500', cursor: status === 'running' ? 'default' : 'pointer', opacity: status === 'running' ? 0.5 : 1, ...F }}>
                   {status === 'running' ? '⏳ Importuje...' : 'Uruchom import'}
                 </button>
               </div>
-
-              {/* Option B - Reset + Import */}
               <div style={{ padding:'16px', border:'2px solid #fecaca', borderRadius:'10px', background:'#fef2f2' }}>
                 <div style={{ fontSize:'13px', fontWeight:'600', color:'#dc2626', marginBottom:'6px' }}>🗑 Reset + Import</div>
-                <div style={{ fontSize:'12px', color:'#dc2626', marginBottom:'12px' }}>
-                  Usuwa WSZYSTKICH klientów i importuje od nowa. Nie można cofnąć!
-                </div>
-                <button onClick={() => {
-                  if (confirm('UWAGA: Usunie wszystkich klientów i ich historię. Kontynuować?')) {
-                    runImport(true)
-                  }
-                }} disabled={status === 'running'}
+                <div style={{ fontSize:'12px', color:'#dc2626', marginBottom:'12px' }}>Usuwa WSZYSTKICH klientów i importuje od nowa. Nie można cofnąć!</div>
+                <button onClick={() => { if (confirm('UWAGA: Usunie wszystkich klientów. Kontynuować?')) runImport(true) }}
+                  disabled={status === 'running'}
                   style={{ width:'100%', padding:'9px', background: status === 'running' ? '#9ca3af' : '#dc2626', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'600', cursor: status === 'running' ? 'default' : 'pointer', ...F }}>
                   {status === 'running' ? '⏳ Importuje...' : '🗑 Reset i importuj'}
                 </button>
@@ -197,13 +231,13 @@ export default function ImportPage() {
         )}
 
         {/* Progress */}
-        {(status === 'running' || status === 'done') && (
+        {['running','done'].includes(status) && (
           <div style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'12px', padding:'24px', marginBottom:'16px' }}>
-            <div style={{ fontSize:'14px', fontWeight:'600', color:'#111', marginBottom:'12px' }}>
+            <div style={{ fontSize:'14px', fontWeight:'600', color:'#111', marginBottom:'10px' }}>
               Postęp: {progress.current} / {progress.total}
             </div>
-            <div style={{ background:'#f4f4f3', borderRadius:'8px', height:'8px', marginBottom:'16px', overflow:'hidden' }}>
-              <div style={{ background: status === 'done' ? '#16a34a' : '#2563eb', height:'100%', borderRadius:'8px', width: `${progress.total ? (progress.current/progress.total*100) : 0}%`, transition:'width 0.3s' }}></div>
+            <div style={{ background:'#f4f4f3', borderRadius:'8px', height:'10px', marginBottom:'16px', overflow:'hidden' }}>
+              <div style={{ background: status === 'done' ? '#16a34a' : '#2563eb', height:'100%', borderRadius:'8px', width:`${progress.total ? (progress.current/progress.total*100) : 0}%`, transition:'width 0.3s' }}></div>
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'10px' }}>
               {[
@@ -222,8 +256,8 @@ export default function ImportPage() {
 
         {/* Log */}
         {log.length > 0 && (
-          <div style={{ background:'#111', borderRadius:'12px', padding:'20px', fontFamily:"'DM Mono', monospace", fontSize:'12px' }}>
-            <div style={{ color:'#9ca3af', marginBottom:'10px', fontSize:'11px', fontFamily:"'DM Sans',sans-serif", fontWeight:'500' }}>LOG</div>
+          <div ref={logRef} style={{ background:'#111', borderRadius:'12px', padding:'20px', fontFamily:"'DM Mono', monospace", fontSize:'12px', maxHeight:'300px', overflowY:'auto' }}>
+            <div style={{ color:'#6b7280', marginBottom:'10px', fontSize:'11px', fontFamily:"'DM Sans',sans-serif", fontWeight:'500' }}>LOG</div>
             {log.map((entry, i) => (
               <div key={i} style={{ marginBottom:'4px', color: entry.type === 'error' ? '#f87171' : entry.type === 'success' ? '#4ade80' : '#9ca3af' }}>
                 <span style={{ color:'#4b5563', marginRight:'8px' }}>{entry.time}</span>
@@ -233,7 +267,6 @@ export default function ImportPage() {
           </div>
         )}
 
-        {/* Done - go to CRM */}
         {status === 'done' && (
           <div style={{ marginTop:'16px', textAlign:'center' }}>
             <button onClick={() => router.push('/crm')}
