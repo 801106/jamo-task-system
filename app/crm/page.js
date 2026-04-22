@@ -2,7 +2,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useRouter } from 'next/navigation'
-
 const ADMIN_ID = 'd53f6727-6bc7-4602-9ce0-4fc31ab3aba1'
 const F = { fontFamily:"'DM Sans',-apple-system,sans-serif" }
 const SEGMENTS = {
@@ -54,7 +53,6 @@ function Pill({ segment, statusKey, lang }) {
 const emptyForm = { company_name:'', contact_name:'', email:'', phone:'', whatsapp:'',
   segment:'b2b', status:'lead', source:'google', marketplace:'', notes:'',
   assigned_to:'', ltv:'', last_order_date:'', workspace:'jamo_healthy', is_vip:false, is_problematic:false }
-
 export default function CRM() {
   const router = useRouter()
   const [user, setUser] = useState(null)
@@ -83,13 +81,10 @@ export default function CRM() {
   const [blDays, setBlDays] = useState(30)
   const [detailTab, setDetailTab] = useState('timeline')
   const [clientTasks, setClientTasks] = useState([])
-  // Reset modal state
   const [showResetModal, setShowResetModal] = useState(false)
   const [resetConfirmText, setResetConfirmText] = useState('')
   const [resetting, setResetting] = useState(false)
-
   const isAdmin = user?.id === ADMIN_ID
-
   useEffect(() => {
     const saved = localStorage.getItem('tf_lang'); if (saved) setLang(saved)
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -99,18 +94,16 @@ export default function CRM() {
     })
     supabase.from('profiles').select('id, full_name').then(({ data }) => setUsers(data || []))
   }, [])
-
   const loadClients = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase.from('clients')
       .select('*, assigned:profiles!assigned_to(full_name)')
       .order('created_at', { ascending: false })
+      .limit(5000)
     setClients(data || [])
     setLoading(false)
   }, [])
-
   useEffect(() => { loadClients() }, [loadClients])
-
   async function loadInteractions(clientId) {
     const { data } = await supabase.from('client_interactions')
       .select('*, author:profiles!created_by(full_name)')
@@ -118,7 +111,6 @@ export default function CRM() {
       .order('created_at', { ascending: false })
     setInteractions(data || [])
   }
-
   async function openDetail(client) {
     setSelectedClient(client)
     setShowDetail(true)
@@ -126,7 +118,6 @@ export default function CRM() {
     await loadInteractions(client.id)
     await loadClientTasks(client.id)
   }
-
   async function loadClientTasks(clientId) {
     const { data } = await supabase.from('tasks')
       .select('*')
@@ -134,18 +125,15 @@ export default function CRM() {
       .order('created_at', { ascending: false })
     setClientTasks(data || [])
   }
-
   async function createTaskForClient() {
     if (!selectedClient) return
     router.push('/dashboard?client_id=' + selectedClient.id + '&client_name=' + encodeURIComponent(selectedClient.company_name || selectedClient.contact_name))
   }
-
   function openNew() {
     setEditingClient(null)
     setForm({ ...emptyForm, assigned_to: user?.id || '' })
     setShowModal(true)
   }
-
   function openEdit(client) {
     setEditingClient(client)
     setForm({
@@ -168,7 +156,6 @@ export default function CRM() {
     })
     setShowModal(true)
   }
-
   async function handleSave() {
     if (!form.contact_name.trim()) return
     setSaving(true)
@@ -191,14 +178,12 @@ export default function CRM() {
     setShowModal(false)
     loadClients()
   }
-
   async function handleDelete(id) {
     if (!confirm(lang==='pl' ? 'Usunac tego klienta? Tej operacji nie mozna cofnac.' : 'Delete this client? This cannot be undone.')) return
     await supabase.from('clients').delete().eq('id', id)
     setShowDetail(false)
     loadClients()
   }
-
   async function addNote() {
     if (!newNote.trim() || !selectedClient) return
     setSavingNote(true)
@@ -209,13 +194,11 @@ export default function CRM() {
     loadClients()
     setSavingNote(false)
   }
-
   async function changeStatus(clientId, status) {
     await supabase.from('clients').update({ status }).eq('id', clientId)
     loadClients()
     if (selectedClient?.id === clientId) setSelectedClient(prev => ({ ...prev, status }))
   }
-
   async function syncBaseLinker() {
     setBlSyncing(true)
     setBlResult(null)
@@ -233,7 +216,6 @@ export default function CRM() {
     }
     setBlSyncing(false)
   }
-
   async function resetAndSync() {
     if (resetConfirmText !== 'RESET') return
     setResetting(true)
@@ -254,7 +236,6 @@ export default function CRM() {
     }
     setResetting(false)
   }
-
   async function autoFlagInactive() {
     const toFlag = clients.filter(c => c.segment === 'b2b' && c.status === 'active' && daysSince(c.last_contact_date) >= 90)
     for (const c of toFlag) {
@@ -262,7 +243,6 @@ export default function CRM() {
     }
     if (toFlag.length > 0) loadClients()
   }
-
   const filtered = clients.filter(c => {
     if (segFilter !== 'all' && c.segment !== segFilter) return false
     if (statusFilter !== 'all' && c.status !== statusFilter) return false
@@ -274,7 +254,6 @@ export default function CRM() {
     }
     return true
   })
-
   const counts = {
     all: clients.length,
     b2b: clients.filter(c => c.segment==='b2b').length,
@@ -282,10 +261,8 @@ export default function CRM() {
     giftbox: clients.filter(c => c.segment==='giftbox').length,
     vip: clients.filter(c => c.is_vip).length,
   }
-
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString(lang==='pl'?'pl-PL':'en-GB') : '—'
   const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d).getTime()) / (1000*60*60*24)) : null
-
   const alerts = clients.filter(c => {
     if (c.segment !== 'b2b' && c.segment !== 'giftbox') return false
     if (c.status === 'lost' || c.status === 'done') return false
@@ -307,11 +284,9 @@ export default function CRM() {
     }
     return { client: c, message: messages[c.status] || `Brak kontaktu od ${days} dni`, days, urgent: days >= 90 || (c.status === 'quote' && days >= 14) }
   }).sort((a,b) => b.days - a.days)
-
   const fmtDT = (d) => d ? new Date(d).toLocaleString(lang==='pl'?'pl-PL':'en-GB', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''
   const initials = (n) => (n||'?').split(' ').map(x=>x[0]).join('').toUpperCase().substring(0,2)
   const interactionIcon = { note:'📝', call:'📞', email:'✉️', meeting:'🤝', order:'📦', complaint:'⚠️', quote:'💰' }
-
   const S = {
     page: { display:'flex', height:'100vh', ...F, fontSize:'14px', background:'#f5f5f3' },
     topbar: { background:'#fff', borderBottom:'1px solid #e8e8e6', padding:'0 24px', height:'56px', display:'flex', alignItems:'center', gap:'12px', flexShrink:0 },
@@ -327,11 +302,9 @@ export default function CRM() {
     label: { display:'block', fontSize:'12px', fontWeight:'500', marginBottom:'4px', color:'#374151' },
     grid2: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'12px' },
   }
-
   return (
     <div style={S.page}>
       <div style={{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }}>
-        {/* TOPBAR */}
         <div style={S.topbar}>
           <button onClick={() => router.push('/dashboard')} style={{ border:'none', background:'none', cursor:'pointer', color:'#9ca3af', fontSize:'20px', lineHeight:'1', padding:'0' }}>←</button>
           <span style={{ fontSize:'15px', fontWeight:'600', letterSpacing:'-0.3px', color:'#111', flex:1 }}>CRM</span>
@@ -358,9 +331,7 @@ export default function CRM() {
           </div>
           <button onClick={openNew} style={S.btnPrimary}>+ Nowy klient</button>
         </div>
-
         <div style={S.content}>
-          {/* STATS */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'10px', marginBottom:'20px' }}>
             {[
               { label:'Wszyscy klienci', val:counts.all, color:'#111' },
@@ -375,8 +346,6 @@ export default function CRM() {
               </div>
             ))}
           </div>
-
-          {/* ALERTS PANEL */}
           {alerts.length > 0 && showAlerts && (
             <div style={{ background:'#fff', border:'1px solid #fde68a', borderRadius:'10px', marginBottom:'14px', overflow:'hidden' }}>
               <div style={{ padding:'10px 14px', background:'#fffbeb', borderBottom:'1px solid #fde68a', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -414,8 +383,6 @@ export default function CRM() {
               </div>
             </div>
           )}
-
-          {/* BASELINKER SYNC PANEL */}
           <div style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', padding:'12px 16px', marginBottom:'14px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }}>
             <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
               <div style={{ width:'28px', height:'28px', background:'#f0f4ff', borderRadius:'7px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'13px' }}>🔗</div>
@@ -442,7 +409,6 @@ export default function CRM() {
                   <>↻ Synchronizuj</>
                 )}
               </button>
-              {/* RESET — tylko dla admina */}
               {isAdmin && (
                 <button onClick={() => setShowResetModal(true)} disabled={blSyncing || resetting}
                   style={{ padding:'7px 12px', background:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca', borderRadius:'8px', fontSize:'12px', fontWeight:'500', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>
@@ -460,8 +426,6 @@ export default function CRM() {
             )}
           </div>
           <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-
-          {/* STATUS FILTER BAR */}
           {segFilter !== 'all' && (
             <div style={{ display:'flex', gap:'6px', marginBottom:'14px', flexWrap:'wrap' }}>
               <button onClick={() => setStatusFilter('all')} style={{ ...S.btnSm(statusFilter==='all'?'blue':''), fontSize:'12px', padding:'5px 12px' }}>Wszystkie statusy</button>
@@ -474,8 +438,6 @@ export default function CRM() {
               ))}
             </div>
           )}
-
-          {/* TABLE */}
           <div style={S.card}>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 80px 110px 120px 90px 80px 120px', padding:'10px 16px', borderBottom:'1px solid #e8e8e6', background:'#fafaf9' }}>
               {['Klient', 'Segment', 'Status', 'Przypisany', 'LTV', 'Ost. kontakt', 'Akcje'].map(h => (
@@ -526,8 +488,6 @@ export default function CRM() {
               )
             })}
           </div>
-
-          {/* KANBAN VIEW */}
           {viewMode === 'kanban' && segFilter === 'b2b' && (
             <div style={{ display:'flex', gap:'10px', overflowX:'auto', paddingBottom:'10px', marginTop:'14px' }}>
               {STATUSES.b2b.filter(s => s.key !== 'lost').map(status => {
@@ -570,8 +530,6 @@ export default function CRM() {
           )}
         </div>
       </div>
-
-      {/* DETAIL PANEL */}
       {showDetail && selectedClient && (
         <div style={{ width:'380px', background:'#fff', borderLeft:'1px solid #e8e8e6', display:'flex', flexDirection:'column', flexShrink:0 }}>
           <div style={{ padding:'14px 16px', borderBottom:'1px solid #e8e8e6', display:'flex', alignItems:'center', gap:'10px' }}>
@@ -612,7 +570,6 @@ export default function CRM() {
               <button onClick={() => handleDelete(selectedClient.id)} style={{ ...S.btnSm('red'), fontSize:'12px', padding:'6px 12px' }}>Usun klienta</button>
             </div>
           </div>
-          {/* TABS */}
           <div style={{ display:'flex', borderBottom:'1px solid #e8e8e6', flexShrink:0 }}>
             {[
               { key:'timeline', label:'Historia' },
@@ -692,8 +649,6 @@ export default function CRM() {
           )}
         </div>
       )}
-
-      {/* NEW/EDIT MODAL */}
       {showModal && (
         <div style={S.overlay}>
           <div style={S.modal('560px')}>
@@ -770,8 +725,6 @@ export default function CRM() {
           </div>
         </div>
       )}
-
-      {/* RESET MODAL — tylko admin */}
       {showResetModal && isAdmin && (
         <div style={S.overlay}>
           <div style={{ background:'#fff', borderRadius:'14px', width:'440px', maxWidth:'95vw', border:'2px solid #fecaca', padding:'24px' }}>
@@ -792,19 +745,14 @@ export default function CRM() {
             </div>
             <div style={{ marginBottom:'16px' }}>
               <label style={{ ...S.label, color:'#dc2626' }}>Wpisz RESET zeby potwierdzic:</label>
-              <input
-                value={resetConfirmText}
-                onChange={e => setResetConfirmText(e.target.value)}
+              <input value={resetConfirmText} onChange={e => setResetConfirmText(e.target.value)}
                 placeholder="Wpisz: RESET"
                 style={{ ...S.input, border:'2px solid #fecaca', fontWeight:'600', letterSpacing:'1px' }}
-                autoFocus
-              />
+                autoFocus />
             </div>
             <div style={{ display:'flex', gap:'8px', justifyContent:'flex-end' }}>
               <button onClick={() => { setShowResetModal(false); setResetConfirmText('') }}
-                style={{ ...S.btnSm(), padding:'9px 18px', fontSize:'13px' }}>
-                Anuluj
-              </button>
+                style={{ ...S.btnSm(), padding:'9px 18px', fontSize:'13px' }}>Anuluj</button>
               <button onClick={resetAndSync} disabled={resetConfirmText !== 'RESET'}
                 style={{ padding:'9px 18px', background: resetConfirmText === 'RESET' ? '#dc2626' : '#9ca3af', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'600', cursor: resetConfirmText === 'RESET' ? 'pointer' : 'default', fontFamily:"'DM Sans',sans-serif" }}>
                 🗑 Tak, wyczysc i importuj
