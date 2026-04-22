@@ -167,12 +167,10 @@ ZADANIE:
    - Active = days_since_last_order <= 90
    - Due to reorder = (avg_days_between_orders - days_since_last_order) <= 14`
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+const response = await fetch('/api/ai-crm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
           system: systemPrompt,
           messages: [
             ...messages.filter(m => m.role !== 'assistant' || messages.indexOf(m) > 0).slice(-6),
