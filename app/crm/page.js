@@ -2,16 +2,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useRouter } from 'next/navigation'
-
 const ADMIN_ID = 'd53f6727-6bc7-4602-9ce0-4fc31ab3aba1'
 const F = { fontFamily:"'DM Sans',-apple-system,sans-serif" }
-
 const SEGMENTS = {
   b2b:     { label:'B2B', labelFull:'Jamo B2B', color:'#1d4ed8', bg:'#eff6ff' },
   b2c:     { label:'B2C', labelFull:'Healthy Future B2C', color:'#065f46', bg:'#ecfdf5' },
   giftbox: { label:'GiftBox', labelFull:'GiftBox / Short Run', color:'#6d28d9', bg:'#f5f3ff' },
 }
-
 const STATUSES = {
   b2b: [
     { key:'lead',     label:'Potencjalny', labelEn:'Lead',     color:'#374151', bg:'#f3f4f6' },
@@ -39,14 +36,11 @@ const STATUSES = {
     { key:'vip',        label:'VIP powracajacy',labelEn:'VIP',      color:'#92400e', bg:'#fffbeb' },
   ],
 }
-
 const SOURCES = ['google','amazon','referral','event','instagram','linkedin','ebay','onbuy','woocommerce','other']
 const MARKETPLACES = ['amazon','ebay','onbuy','woocommerce','allegro','other']
-
 function statusMeta(segment, key) {
   return STATUSES[segment]?.find(s => s.key === key) || { label: key, color:'#374151', bg:'#f3f4f6' }
 }
-
 function Pill({ segment, statusKey, lang }) {
   const m = statusMeta(segment, statusKey)
   return (
@@ -55,36 +49,27 @@ function Pill({ segment, statusKey, lang }) {
     </span>
   )
 }
-
 const emptyForm = {
   company_name:'', contact_name:'', email:'', phone:'', whatsapp:'',
   segment:'b2b', status:'lead', source:'google', marketplace:'', notes:'',
   assigned_to:'', ltv:'', last_order_date:'', workspace:'jamo_healthy', is_vip:false, is_problematic:false
 }
-
-// AI Assistant Panel
 function AIAssistant({ clients, onFilterResults, lang }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: lang === 'pl'
-        ? '👋 Cześć! Jestem Twoim asystentem CRM. Możesz mnie zapytać o klientów w języku naturalnym.\n\nPrzykłady:\n• "Pokaż klientów którzy nie zamawiali od 3 miesięcy"\n• "Kto ma najwyższe LTV?"\n• "Znajdź klientów z ryzykiem odejścia"\n• "Którzy klienci zamówili tylko raz?"\n• "Pokaż VIP-ów B2B"'
-        : '👋 Hi! I\'m your CRM assistant. Ask me about your customers in natural language.\n\nExamples:\n• "Show customers who haven\'t ordered in 3 months"\n• "Who has the highest LTV?"\n• "Find customers at churn risk"\n• "Which customers ordered only once?"'
+      content: '👋 Cześć! Jestem Twoim asystentem CRM. Możesz mnie zapytać o klientów w języku naturalnym.\n\nPrzykłady:\n• "Pokaż klientów którzy nie zamawiali od 3 miesięcy"\n• "Kto ma najwyższe LTV?"\n• "Znajdź klientów z ryzykiem odejścia"\n• "Którzy klienci zamówili tylko raz?"\n• "Pokaż VIP-ów B2B"'
     }
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef(null)
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
-
   const now = new Date()
-
   function buildClientSummary(clients) {
-    // Build a compact summary for AI context
     const today = new Date()
     return clients.map(c => {
       const daysSince = c.last_order_date
@@ -97,7 +82,6 @@ function AIAssistant({ clients, onFilterResults, lang }) {
       const avgDays = avgDaysMatch ? parseInt(avgDaysMatch[1]) : null
       const firstOrderMatch = notes.match(/Pierwszy: (\d{4}-\d{2}-\d{2})/)
       const firstOrder = firstOrderMatch ? firstOrderMatch[1] : null
-
       return {
         id: c.id,
         name: c.company_name || c.contact_name,
@@ -116,15 +100,12 @@ function AIAssistant({ clients, onFilterResults, lang }) {
       }
     })
   }
-
   async function sendMessage() {
     if (!input.trim() || loading) return
-
     const userMsg = input.trim()
     setInput('')
     setMessages(prev => [...prev, { role: 'user', content: userMsg }])
     setLoading(true)
-
     try {
       const clientSummary = buildClientSummary(clients)
       const stats = {
@@ -138,9 +119,7 @@ function AIAssistant({ clients, onFilterResults, lang }) {
         one_time: clientSummary.filter(c => c.order_count === 1).length,
         avg_ltv: Math.round(clients.reduce((a, c) => a + (c.ltv || 0), 0) / clients.length),
       }
-
       const systemPrompt = `Jesteś asystentem CRM dla firmy Jamo Packaging Solutions (UK). Pomagasz analizować bazę klientów i odpowiadać na pytania.
-
 DANE OGÓLNE:
 - Łącznie klientów: ${stats.total}
 - B2B (Jamo opakowania): ${stats.b2b}
@@ -151,23 +130,16 @@ DANE OGÓLNE:
 - Churned (180+ dni): ${stats.churned}
 - Jednorazowi: ${stats.one_time}
 - Średnie LTV: £${stats.avg_ltv}
-
 LISTA KLIENTÓW (JSON):
 ${JSON.stringify(clientSummary.slice(0, 500), null, 0)}
-
-ZADANIE:
-1. Odpowiedz na pytanie użytkownika po polsku
-2. Jeśli pytanie dotyczy konkretnych klientów - zwróć ich listę w formacie JSON na końcu odpowiedzi w bloku: <FILTER_RESULT>["id1","id2",...]</FILTER_RESULT>
-3. Bądź konkretny i pomocny
-4. Dzisiejsza data: ${now.toISOString().split('T')[0]}
-5. Jeśli pytasz o segmenty:
-   - Sample only = klienci z jednym zamówieniem i statusem 'sample' lub notes zawierające 'sample'
-   - Churned = days_since_last_order > 180
-   - At risk = days_since_last_order między 90-180
-   - Active = days_since_last_order <= 90
-   - Due to reorder = (avg_days_between_orders - days_since_last_order) <= 14`
-
-const response = await fetch('/api/ai-crm', {
+ZASADY ODPOWIEDZI:
+1. Odpowiadaj po polsku, konkretnie i pomocnie
+2. Dzisiejsza data: ${now.toISOString().split('T')[0]}
+3. Jeśli pytanie dotyczy konkretnych klientów, na SAMYM KOŃCU odpowiedzi dodaj TYLKO tę jedną linię:
+FILTER_IDS:["id1","id2","id3"]
+4. NIE używaj tagów XML. NIE pisz FILTER_RESULT ani żadnych innych tagów.
+5. Segmenty: Churned = days_since_last_order > 180, At risk = 90-180 dni, Active = do 90 dni`
+      const response = await fetch('/api/ai-crm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -178,32 +150,31 @@ const response = await fetch('/api/ai-crm', {
           ]
         })
       })
-
       const data = await response.json()
       const aiText = data.content?.[0]?.text || 'Przepraszam, nie mogłem przetworzyć zapytania.'
-
-      // Extract filter result if present
-      const filterMatch = aiText.match(/<FILTER_RESULT>([\s\S]*?)<\/FILTER_RESULT>/)
-      let cleanText = aiText.replace(/<FILTER_RESULT>[\s\S]*?<\/FILTER_RESULT>/g, '').trim()
-
+      // Extract FILTER_IDS line — works with or without closing tag
+      const filterMatch = aiText.match(/FILTER_IDS:(\[[\s\S]*?\])/)
+      // Remove FILTER_IDS line and any XML tags from displayed text
+      let cleanText = aiText
+        .replace(/FILTER_IDS:\[[\s\S]*?\]/g, '')
+        .replace(/<FILTER_RESULT>[\s\S]*?<\/FILTER_RESULT>/g, '')
+        .replace(/<FILTER_RESULT>[\s\S]*/g, '')
+        .trim()
       if (filterMatch) {
         try {
           const ids = JSON.parse(filterMatch[1])
-          onFilterResults(ids, userMsg)
-          cleanText += `\n\n✅ Pokazuję ${ids.length} klientów w tabeli poniżej.`
-        } catch (e) {
-          // ignore parse error
-        }
+          if (ids.length > 0) {
+            onFilterResults(ids, userMsg)
+            cleanText += `\n\n✅ Pokazuję ${ids.length} klientów w tabeli poniżej.`
+          }
+        } catch (e) {}
       }
-
       setMessages(prev => [...prev, { role: 'assistant', content: cleanText }])
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: `❌ Błąd: ${err.message}` }])
     }
-
     setLoading(false)
   }
-
   const suggestions = [
     'Kto nie zamawiał od 3 miesięcy?',
     'Pokaż VIP-ów B2B',
@@ -212,10 +183,8 @@ const response = await fetch('/api/ai-crm', {
     'Najwyższe LTV top 10',
     'Klienci z ryzykiem odejścia',
   ]
-
   return (
     <div style={{ marginBottom:'14px' }}>
-      {/* AI Toggle Button */}
       <button onClick={() => setOpen(v => !v)}
         style={{ display:'flex', alignItems:'center', gap:'8px', width:'100%', padding:'12px 16px', background: open ? '#111' : '#fff', border:`1px solid ${open ? '#111' : '#e8e8e6'}`, borderRadius:'10px', cursor:'pointer', ...F, transition:'all 0.2s' }}>
         <span style={{ fontSize:'16px' }}>🤖</span>
@@ -225,10 +194,8 @@ const response = await fetch('/api/ai-crm', {
         </div>
         <span style={{ fontSize:'12px', color: open ? 'white' : '#9ca3af' }}>{open ? '▲' : '▼'}</span>
       </button>
-
       {open && (
         <div style={{ background:'#fff', border:'1px solid #e8e8e6', borderTop:'none', borderRadius:'0 0 10px 10px', overflow:'hidden' }}>
-          {/* Messages */}
           <div style={{ height:'280px', overflowY:'auto', padding:'16px', display:'flex', flexDirection:'column', gap:'10px', background:'#fafaf9' }}>
             {messages.map((msg, i) => (
               <div key={i} style={{ display:'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
@@ -254,11 +221,9 @@ const response = await fetch('/api/ai-crm', {
             )}
             <div ref={messagesEndRef} />
           </div>
-
-          {/* Suggestions */}
           <div style={{ padding:'8px 16px', borderTop:'1px solid #f0f0ee', display:'flex', gap:'6px', flexWrap:'wrap' }}>
             {suggestions.map(s => (
-              <button key={s} onClick={() => { setInput(s); }}
+              <button key={s} onClick={() => setInput(s)}
                 style={{ padding:'4px 10px', background:'#f4f4f3', border:'1px solid #e8e8e6', borderRadius:'20px', fontSize:'11px', cursor:'pointer', color:'#374151', ...F }}
                 onMouseEnter={e => e.currentTarget.style.background = '#e8e8e6'}
                 onMouseLeave={e => e.currentTarget.style.background = '#f4f4f3'}>
@@ -266,8 +231,6 @@ const response = await fetch('/api/ai-crm', {
               </button>
             ))}
           </div>
-
-          {/* Input */}
           <div style={{ padding:'12px 16px', borderTop:'1px solid #f0f0ee', display:'flex', gap:'8px' }}>
             <input
               value={input}
@@ -296,7 +259,6 @@ const response = await fetch('/api/ai-crm', {
     </div>
   )
 }
-
 export default function CRM() {
   const router = useRouter()
   const [user, setUser] = useState(null)
@@ -331,7 +293,6 @@ export default function CRM() {
   const [resetConfirmText, setResetConfirmText] = useState('')
   const [resetting, setResetting] = useState(false)
   const isAdmin = user?.id === ADMIN_ID
-
   useEffect(() => {
     const saved = localStorage.getItem('tf_lang'); if (saved) setLang(saved)
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -341,7 +302,6 @@ export default function CRM() {
     })
     supabase.from('profiles').select('id, full_name').then(({ data }) => setUsers(data || []))
   }, [])
-
   const loadClients = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase.from('clients')
@@ -351,9 +311,7 @@ export default function CRM() {
     setClients(data || [])
     setLoading(false)
   }, [])
-
   useEffect(() => { loadClients() }, [loadClients])
-
   async function loadInteractions(clientId) {
     const { data } = await supabase.from('client_interactions')
       .select('*, author:profiles!created_by(full_name)')
@@ -361,7 +319,6 @@ export default function CRM() {
       .order('created_at', { ascending: false })
     setInteractions(data || [])
   }
-
   async function openDetail(client) {
     setSelectedClient(client)
     setShowDetail(true)
@@ -369,7 +326,6 @@ export default function CRM() {
     await loadInteractions(client.id)
     await loadClientTasks(client.id)
   }
-
   async function loadClientTasks(clientId) {
     const { data } = await supabase.from('tasks')
       .select('*')
@@ -377,18 +333,15 @@ export default function CRM() {
       .order('created_at', { ascending: false })
     setClientTasks(data || [])
   }
-
   async function createTaskForClient() {
     if (!selectedClient) return
     router.push('/dashboard?client_id=' + selectedClient.id + '&client_name=' + encodeURIComponent(selectedClient.company_name || selectedClient.contact_name))
   }
-
   function openNew() {
     setEditingClient(null)
     setForm({ ...emptyForm, assigned_to: user?.id || '' })
     setShowModal(true)
   }
-
   function openEdit(client) {
     setEditingClient(client)
     setForm({
@@ -411,7 +364,6 @@ export default function CRM() {
     })
     setShowModal(true)
   }
-
   async function handleSave() {
     if (!form.contact_name.trim()) return
     setSaving(true)
@@ -434,14 +386,12 @@ export default function CRM() {
     setShowModal(false)
     loadClients()
   }
-
   async function handleDelete(id) {
     if (!confirm(lang === 'pl' ? 'Usunac tego klienta? Tej operacji nie mozna cofnac.' : 'Delete this client? This cannot be undone.')) return
     await supabase.from('clients').delete().eq('id', id)
     setShowDetail(false)
     loadClients()
   }
-
   async function addNote() {
     if (!newNote.trim() || !selectedClient) return
     setSavingNote(true)
@@ -452,13 +402,11 @@ export default function CRM() {
     loadClients()
     setSavingNote(false)
   }
-
   async function changeStatus(clientId, status) {
     await supabase.from('clients').update({ status }).eq('id', clientId)
     loadClients()
     if (selectedClient?.id === clientId) setSelectedClient(prev => ({ ...prev, status }))
   }
-
   async function syncBaseLinker() {
     setBlSyncing(true)
     setBlResult(null)
@@ -476,7 +424,6 @@ export default function CRM() {
     }
     setBlSyncing(false)
   }
-
   async function resetAndSync() {
     if (resetConfirmText !== 'RESET') return
     setResetting(true)
@@ -497,7 +444,6 @@ export default function CRM() {
     }
     setResetting(false)
   }
-
   async function autoFlagInactive() {
     const toFlag = clients.filter(c => c.segment === 'b2b' && c.status === 'active' && daysSince(c.last_contact_date) >= 90)
     for (const c of toFlag) {
@@ -505,7 +451,6 @@ export default function CRM() {
     }
     if (toFlag.length > 0) loadClients()
   }
-
   function handleAIFilter(ids, label) {
     setAiFilterIds(ids)
     setAiFilterLabel(label)
@@ -515,9 +460,7 @@ export default function CRM() {
       setSearch('')
     }
   }
-
   const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d).getTime()) / (1000 * 60 * 60 * 24)) : null
-
   const filtered = clients.filter(c => {
     if (aiFilterIds) return aiFilterIds.includes(c.id)
     if (segFilter !== 'all' && c.segment !== segFilter) return false
@@ -530,7 +473,6 @@ export default function CRM() {
     }
     return true
   })
-
   const counts = {
     all: clients.length,
     b2b: clients.filter(c => c.segment === 'b2b').length,
@@ -538,9 +480,7 @@ export default function CRM() {
     giftbox: clients.filter(c => c.segment === 'giftbox').length,
     vip: clients.filter(c => c.is_vip).length,
   }
-
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString(lang === 'pl' ? 'pl-PL' : 'en-GB') : '—'
-
   const alerts = clients.filter(c => {
     if (c.segment !== 'b2b' && c.segment !== 'giftbox') return false
     if (c.status === 'lost' || c.status === 'done') return false
@@ -562,11 +502,9 @@ export default function CRM() {
     }
     return { client: c, message: messages[c.status] || `Brak kontaktu od ${days} dni`, days, urgent: days >= 90 || (c.status === 'quote' && days >= 14) }
   }).sort((a, b) => b.days - a.days)
-
   const fmtDT = (d) => d ? new Date(d).toLocaleString(lang === 'pl' ? 'pl-PL' : 'en-GB', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
   const initials = (n) => (n || '?').split(' ').map(x => x[0]).join('').toUpperCase().substring(0, 2)
   const interactionIcon = { note: '📝', call: '📞', email: '✉️', meeting: '🤝', order: '📦', complaint: '⚠️', quote: '💰' }
-
   const S = {
     page: { display: 'flex', height: '100vh', ...F, fontSize: '14px', background: '#f5f5f3' },
     topbar: { background: '#fff', borderBottom: '1px solid #e8e8e6', padding: '0 24px', height: '56px', display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 },
@@ -582,11 +520,9 @@ export default function CRM() {
     label: { display: 'block', fontSize: '12px', fontWeight: '500', marginBottom: '4px', color: '#374151' },
     grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' },
   }
-
   return (
     <div style={S.page}>
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-        {/* TOPBAR */}
         <div style={S.topbar}>
           <button onClick={() => router.push('/dashboard')} style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#9ca3af', fontSize: '20px', lineHeight: '1', padding: '0' }}>←</button>
           <span style={{ fontSize: '15px', fontWeight: '600', letterSpacing: '-0.3px', color: '#111', flex: 1 }}>CRM</span>
@@ -613,9 +549,7 @@ export default function CRM() {
           </div>
           <button onClick={openNew} style={S.btnPrimary}>+ Nowy klient</button>
         </div>
-
         <div style={S.content}>
-          {/* STATS */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '10px', marginBottom: '20px' }}>
             {[
               { label: 'Wszyscy klienci', val: counts.all, color: '#111' },
@@ -630,11 +564,7 @@ export default function CRM() {
               </div>
             ))}
           </div>
-
-          {/* AI ASSISTANT */}
           <AIAssistant clients={clients} onFilterResults={handleAIFilter} lang={lang} />
-
-          {/* AI Filter Active Banner */}
           {aiFilterIds && (
             <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', padding: '10px 14px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span style={{ fontSize: '14px' }}>🤖</span>
@@ -647,21 +577,15 @@ export default function CRM() {
               </button>
             </div>
           )}
-
-          {/* ALERTS PANEL */}
           {alerts.length > 0 && showAlerts && !aiFilterIds && (
             <div style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: '10px', marginBottom: '14px', overflow: 'hidden' }}>
               <div style={{ padding: '10px 14px', background: '#fffbeb', borderBottom: '1px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
                   <span style={{ fontSize: '14px' }}>⚠️</span>
-                  <span style={{ fontSize: '13px', fontWeight: '600', color: '#92400e' }}>
-                    {alerts.length} klientow wymaga uwagi
-                  </span>
+                  <span style={{ fontSize: '13px', fontWeight: '600', color: '#92400e' }}>{alerts.length} klientow wymaga uwagi</span>
                 </div>
                 <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <button onClick={autoFlagInactive} style={{ fontSize: '11px', padding: '3px 10px', background: '#92400e', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>
-                    Auto-oznacz nieaktywnych
-                  </button>
+                  <button onClick={autoFlagInactive} style={{ fontSize: '11px', padding: '3px 10px', background: '#92400e', color: 'white', border: 'none', borderRadius: '5px', cursor: 'pointer', fontFamily: "'DM Sans',sans-serif" }}>Auto-oznacz nieaktywnych</button>
                   <button onClick={() => setShowAlerts(false)} style={{ fontSize: '16px', background: 'none', border: 'none', cursor: 'pointer', color: '#9ca3af', lineHeight: '1' }}>×</button>
                 </div>
               </div>
@@ -686,8 +610,6 @@ export default function CRM() {
               </div>
             </div>
           )}
-
-          {/* BASELINKER SYNC PANEL */}
           <div style={{ background: '#fff', border: '1px solid #e8e8e6', borderRadius: '10px', padding: '12px 16px', marginBottom: '14px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <div style={{ width: '28px', height: '28px', background: '#f0f4ff', borderRadius: '7px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px' }}>🔗</div>
@@ -722,8 +644,6 @@ export default function CRM() {
             )}
           </div>
           <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-
-          {/* STATUS FILTER BAR */}
           {segFilter !== 'all' && !aiFilterIds && (
             <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
               <button onClick={() => setStatusFilter('all')} style={{ ...S.btnSm(statusFilter === 'all' ? 'blue' : ''), fontSize: '12px', padding: '5px 12px' }}>Wszystkie statusy</button>
@@ -736,8 +656,6 @@ export default function CRM() {
               ))}
             </div>
           )}
-
-          {/* TABLE */}
           <div style={S.card}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 110px 120px 90px 80px 120px', padding: '10px 16px', borderBottom: '1px solid #e8e8e6', background: '#fafaf9' }}>
               {['Klient', 'Segment', 'Status', 'Przypisany', 'LTV', 'Ost. kontakt', 'Akcje'].map(h => (
@@ -788,8 +706,6 @@ export default function CRM() {
               )
             })}
           </div>
-
-          {/* KANBAN */}
           {viewMode === 'kanban' && segFilter === 'b2b' && !aiFilterIds && (
             <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '10px', marginTop: '14px' }}>
               {STATUSES.b2b.filter(s => s.key !== 'lost').map(status => {
@@ -820,8 +736,6 @@ export default function CRM() {
           )}
         </div>
       </div>
-
-      {/* DETAIL PANEL */}
       {showDetail && selectedClient && (
         <div style={{ width: '380px', background: '#fff', borderLeft: '1px solid #e8e8e6', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
           <div style={{ padding: '14px 16px', borderBottom: '1px solid #e8e8e6', display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -938,8 +852,6 @@ export default function CRM() {
           )}
         </div>
       )}
-
-      {/* NEW/EDIT MODAL */}
       {showModal && (
         <div style={S.overlay}>
           <div style={S.modal('560px')}>
@@ -1016,8 +928,6 @@ export default function CRM() {
           </div>
         </div>
       )}
-
-      {/* RESET MODAL */}
       {showResetModal && isAdmin && (
         <div style={S.overlay}>
           <div style={{ background: '#fff', borderRadius: '14px', width: '440px', maxWidth: '95vw', border: '2px solid #fecaca', padding: '24px' }}>
@@ -1032,8 +942,7 @@ export default function CRM() {
               <strong>Co sie stanie:</strong><br />
               1. Usunieci zostana wszyscy klienci ({clients.length})<br />
               2. Usunieta zostanie cala historia interakcji<br />
-              3. Reimport z BaseLinker za ostatnie {blDays} dni<br />
-              <br />
+              3. Reimport z BaseLinker za ostatnie {blDays} dni<br /><br />
               <strong>Tej operacji nie mozna cofnac!</strong>
             </div>
             <div style={{ marginBottom: '16px' }}>
