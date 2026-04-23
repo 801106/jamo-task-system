@@ -153,13 +153,12 @@ FILTER_IDS:["id1","id2","id3"]
       const data = await response.json()
       const aiText = data.content?.[0]?.text || 'Przepraszam, nie mogłem przetworzyć zapytania.'
       // Extract FILTER_IDS line — works with or without closing tag
-      const filterMatch = aiText.match(/FILTER_IDS:(\[[\s\S]*?\])/)
-      // Remove FILTER_IDS line and any XML tags from displayed text
-      let cleanText = aiText
-        .replace(/FILTER_IDS:\[[\s\S]*?\]/g, '')
-        .replace(/<FILTER_RESULT>[\s\S]*?<\/FILTER_RESULT>/g, '')
-        .replace(/<FILTER_RESULT>[\s\S]*/g, '')
-        .trim()
+      const filterMatch = aiText.match(/FILTER_IDS:(\[[^\]]*\])/)
+// Remove FILTER_IDS line and any XML tags from displayed text
+let cleanText = aiText
+  .replace(/FILTER_IDS:\[[^\]]*\]/g, '')
+  .replace(/<FILTER_RESULT[\s\S]*$/g, '')
+  .trim()
       if (filterMatch) {
         try {
           const ids = JSON.parse(filterMatch[1])
