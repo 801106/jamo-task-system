@@ -203,9 +203,17 @@ function NotificationBell({ notifications, onMarkRead, onMarkAllRead, onClickNot
 function SuggestionsPanel({ user, profile, users }) {
   const [suggestions, setSuggestions] = useState([])
   const [newText, setNewText] = useState('')
-  const [category, setCategory] = useState('general')
+  const [newCategory, setNewCategory] = useState('general')
+  const [filterCat, setFilterCat] = useState('all')
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState(null)
+  const [newComment, setNewComment] = useState('')
+  const [comments, setComments] = useState([])
+  const [sendingCmt, setSendingCmt] = useState(false)
+  const [files, setFiles] = useState([])
+  const [uploading, setUploading] = useState(false)
+  const fileRef = useRef(null)
 
   useEffect(() => { loadSuggestions() }, [])
 
@@ -221,9 +229,9 @@ function SuggestionsPanel({ user, profile, users }) {
   async function addSuggestion() {
     if (!newText.trim() || !user) return
     setSaving(true)
-    await supabase.from('suggestions').insert({ content: newText.trim(), category, author_id: user.id })
+    await supabase.from('suggestions').insert({ content: newText.trim(), category: newCategory, author_id: user.id })
     setNewText('')
-    setCategory('general')
+    setNewCategory('general')
     await loadSuggestions()
     setSaving(false)
   }
@@ -231,101 +239,213 @@ function SuggestionsPanel({ user, profile, users }) {
   async function deleteSuggestion(id) {
     if (!confirm('Usunac te sugestie?')) return
     await supabase.from('suggestions').delete().eq('id', id)
+    if (selected?.id === id) setSelected(null)
     await loadSuggestions()
+  }
+
+  async function openDetail(s) {
+    setSelected(s)
+    await loadComments(s.id)
+    await loadFiles(s.id)
+  }
+
+  async function loadComments(suggId) {
+    const { data } = await supabase.from('suggestion_comments')
+      .select('*, author:profiles!author_id(full_name)')
+      .eq('suggestion_id', suggId)
+      .order('created_at', { ascending: true })
+    setComments(data || [])
+  }
+
+  async function loadFiles(suggId) {
+    const { data } = await supabase.storage.from('task-files').list(`suggestions/${suggId}`)
+    setFiles(data || [])
+  }
+
+  async function sendComment() {
+    if (!newComment.trim() || !selected || !user) return
+    setSendingCmt(true)
+    await supabase.from('suggestion_comments').insert({ suggestion_id: selected.id, author_id: user.id, content: newComment.trim() })
+    setNewComment('')
+    await loadComments(selected.id)
+    setSendingCmt(false)
+  }
+
+  async function uploadFile(e) {
+    const file = e.target.files[0]; if (!file || !selected) return
+    setUploading(true)
+    await supabase.storage.from('task-files').upload(`suggestions/${selected.id}/${Date.now()}_${file.name}`, file)
+    await loadFiles(selected.id)
+    setUploading(false)
+    e.target.value = ''
+  }
+
+  async function getFileUrl(name) {
+    const { data } = await supabase.storage.from('task-files').createSignedUrl(`suggestions/${selected.id}/${name}`, 3600)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
   }
 
   const fmtDT = (d) => d ? new Date(d).toLocaleString('pl-PL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''
   const initials = (n) => (n||'?').split(' ').map(x=>x[0]).join('').toUpperCase().substring(0,2)
   const catMeta = (key) => SUGGESTION_CATEGORIES.find(c => c.key === key) || SUGGESTION_CATEGORIES[0]
 
-  return (
-    <div style={{ flex:1, overflow:'auto', padding:'20px 24px' }}>
-      {/* Header */}
-      <div style={{ background:'#fff', borderRadius:'12px', border:'1px solid #e8e8e6', padding:'20px 24px', marginBottom:'16px' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
-          <span style={{ fontSize:'20px' }}>💡</span>
-          <div>
-            <div style={{ fontSize:'15px', fontWeight:'600', color:'#111' }}>Sugestie i usprawnienia</div>
-            <div style={{ fontSize:'12px', color:'#9ca3af' }}>Podziel się pomysłem na ulepszenie systemu — każdy może dodać i zobaczyć sugestie</div>
-          </div>
-        </div>
+  const filtered = filterCat === 'all' ? suggestions : suggestions.filter(s => s.category === filterCat)
 
-        {/* Add form */}
-        <div style={{ marginTop:'16px', display:'flex', gap:'8px', alignItems:'flex-start' }}>
-          <div style={{ flex:1 }}>
-            <textarea
-              value={newText}
-              onChange={e => setNewText(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && e.ctrlKey && addSuggestion()}
-              placeholder="Opisz co chcesz ulepszyć, zmienić lub dodać... (Ctrl+Enter żeby wysłać)"
-              style={{ ...S.input, height:'72px', resize:'vertical', marginBottom:'8px' }}
-            />
-            <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
-              {SUGGESTION_CATEGORIES.map(cat => (
-                <button key={cat.key} onClick={() => setCategory(cat.key)}
-                  style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor: category===cat.key?cat.color:'#e8e8e6', background: category===cat.key?cat.bg:'#fff', color: category===cat.key?cat.color:'#6b7280', fontFamily:"'DM Sans',sans-serif" }}>
-                  {cat.label}
-                </button>
-              ))}
+  return (
+    <div style={{ flex:1, overflow:'hidden', display:'flex' }}>
+      {/* LEFT — list */}
+      <div style={{ flex:1, overflow:'auto', padding:'20px 24px' }}>
+        {/* Header + form */}
+        <div style={{ background:'#fff', borderRadius:'12px', border:'1px solid #e8e8e6', padding:'20px 24px', marginBottom:'16px' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'12px' }}>
+            <span style={{ fontSize:'20px' }}>💡</span>
+            <div>
+              <div style={{ fontSize:'15px', fontWeight:'600', color:'#111' }}>Sugestie i usprawnienia</div>
+              <div style={{ fontSize:'12px', color:'#9ca3af' }}>Podziel się pomysłem — każdy może dodać i skomentować</div>
             </div>
           </div>
-          <button onClick={addSuggestion} disabled={saving || !newText.trim()}
-            style={{ ...S.btnPrimary, opacity: saving||!newText.trim()?0.5:1, marginTop:'2px', flexShrink:0 }}>
-            {saving ? 'Dodaje...' : '+ Dodaj'}
-          </button>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'8px', marginBottom:'16px' }}>
-        {[{ label:'Wszystkie', val:suggestions.length, color:'#111' }, ...SUGGESTION_CATEGORIES.map(c => ({
-          label: c.label, val: suggestions.filter(s => s.category === c.key).length, color: c.color
-        }))].map(s => (
-          <div key={s.label} style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'8px', padding:'10px 14px' }}>
-            <div style={{ fontSize:'9px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'4px' }}>{s.label}</div>
-            <div style={{ fontSize:'20px', fontWeight:'600', color:s.color }}>{s.val}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* List */}
-      <div style={{ background:'#fff', borderRadius:'12px', border:'1px solid #e8e8e6', overflow:'hidden' }}>
-        {loading && <div style={{ padding:'40px', textAlign:'center', color:'#9ca3af' }}>Ladowanie...</div>}
-        {!loading && suggestions.length === 0 && (
-          <div style={{ padding:'48px', textAlign:'center', color:'#9ca3af', fontSize:'13px' }}>
-            <div style={{ fontSize:'32px', marginBottom:'10px' }}>💡</div>
-            Brak sugestii — bądź pierwszy!
-          </div>
-        )}
-        {suggestions.map((s, i) => {
-          const cat = catMeta(s.category)
-          const isOwn = s.author_id === user?.id
-          const isAdmin = user?.id === ADMIN_ID
-          return (
-            <div key={s.id} style={{ padding:'16px 20px', borderBottom:'1px solid #f0f0ee', background: i%2===0?'#fff':'#f9f9f8' }}>
-              <div style={{ display:'flex', alignItems:'flex-start', gap:'12px' }}>
-                {/* Avatar */}
-                <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:'#eff6ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:'600', color:'#1d4ed8', flexShrink:0 }}>
-                  {initials(s.author?.full_name)}
-                </div>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px', flexWrap:'wrap' }}>
-                    <span style={{ fontSize:'12px', fontWeight:'600', color:'#111' }}>{s.author?.full_name || 'Nieznany'}</span>
-                    <span style={{ fontSize:'11px', color:'#9ca3af' }}>{fmtDT(s.created_at)}</span>
-                    <span style={{ fontSize:'10px', fontWeight:'500', padding:'2px 8px', borderRadius:'20px', background:cat.bg, color:cat.color }}>
-                      {cat.label}
-                    </span>
-                  </div>
-                  <div style={{ fontSize:'13px', color:'#374151', lineHeight:'1.6', whiteSpace:'pre-wrap' }}>{s.content}</div>
-                </div>
-                {(isOwn || isAdmin) && (
-                  <button onClick={() => deleteSuggestion(s.id)} style={{ ...S.btnSm('red'), flexShrink:0, opacity:0.6 }}>Usun</button>
-                )}
+          <div style={{ display:'flex', gap:'8px', alignItems:'flex-start' }}>
+            <div style={{ flex:1 }}>
+              <textarea value={newText} onChange={e => setNewText(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && e.ctrlKey && addSuggestion()}
+                placeholder="Opisz co chcesz ulepszyć... (Ctrl+Enter żeby wysłać)"
+                style={{ ...S.input, height:'64px', resize:'vertical', marginBottom:'8px' }} />
+              <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+                {SUGGESTION_CATEGORIES.map(cat => (
+                  <button key={cat.key} onClick={() => setNewCategory(cat.key)}
+                    style={{ padding:'3px 9px', borderRadius:'20px', fontSize:'11px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor: newCategory===cat.key?cat.color:'#e8e8e6', background: newCategory===cat.key?cat.bg:'#fff', color: newCategory===cat.key?cat.color:'#6b7280', fontFamily:"'DM Sans',sans-serif" }}>
+                    {cat.label}
+                  </button>
+                ))}
               </div>
             </div>
-          )
-        })}
+            <button onClick={addSuggestion} disabled={saving || !newText.trim()}
+              style={{ ...S.btnPrimary, opacity: saving||!newText.trim()?0.5:1, marginTop:'2px', flexShrink:0 }}>
+              {saving ? 'Dodaje...' : '+ Dodaj'}
+            </button>
+          </div>
+        </div>
+
+        {/* Filter stats — KLIKALNE */}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(6,1fr)', gap:'8px', marginBottom:'16px' }}>
+          {[{ key:'all', label:'Wszystkie', val:suggestions.length, color:'#111', bg:'#f4f4f3' },
+            ...SUGGESTION_CATEGORIES.map(c => ({ key:c.key, label:c.label, val:suggestions.filter(s=>s.category===c.key).length, color:c.color, bg:c.bg }))
+          ].map(s => (
+            <div key={s.key} onClick={() => setFilterCat(s.key)}
+              style={{ background: filterCat===s.key ? s.bg : '#fff', border:`${filterCat===s.key?2:1}px solid ${filterCat===s.key?s.color:'#e8e8e6'}`, borderRadius:'8px', padding:'10px 14px', cursor:'pointer', transition:'all 0.15s' }}
+              onMouseEnter={e => { e.currentTarget.style.background = s.bg; e.currentTarget.style.borderColor = s.color }}
+              onMouseLeave={e => { e.currentTarget.style.background = filterCat===s.key?s.bg:'#fff'; e.currentTarget.style.borderColor = filterCat===s.key?s.color:'#e8e8e6' }}>
+              <div style={{ fontSize:'9px', color: filterCat===s.key?s.color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'4px', fontWeight:'500' }}>{s.label}</div>
+              <div style={{ fontSize:'20px', fontWeight:'600', color:s.color }}>{s.val}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* List */}
+        <div style={{ background:'#fff', borderRadius:'12px', border:'1px solid #e8e8e6', overflow:'hidden' }}>
+          {filterCat !== 'all' && (
+            <div style={{ padding:'8px 16px', background: catMeta(filterCat).bg, borderBottom:'1px solid #e8e8e6', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <span style={{ fontSize:'12px', fontWeight:'500', color: catMeta(filterCat).color }}>Filtr: {catMeta(filterCat).label} ({filtered.length})</span>
+              <button onClick={() => setFilterCat('all')} style={{ fontSize:'11px', color:'#9ca3af', border:'none', background:'none', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>× Wyczysc</button>
+            </div>
+          )}
+          {loading && <div style={{ padding:'40px', textAlign:'center', color:'#9ca3af' }}>Ladowanie...</div>}
+          {!loading && filtered.length === 0 && (
+            <div style={{ padding:'48px', textAlign:'center', color:'#9ca3af', fontSize:'13px' }}>
+              <div style={{ fontSize:'32px', marginBottom:'10px' }}>💡</div>
+              Brak sugestii w tej kategorii
+            </div>
+          )}
+          {filtered.map((s, i) => {
+            const cat = catMeta(s.category)
+            const isOwn = s.author_id === user?.id
+            const isAdmin = user?.id === ADMIN_ID
+            const isActive = selected?.id === s.id
+            return (
+              <div key={s.id} onClick={() => openDetail(s)}
+                style={{ padding:'14px 20px', borderBottom:'1px solid #f0f0ee', background: isActive?'#eff6ff':i%2===0?'#fff':'#f9f9f8', cursor:'pointer', borderLeft: isActive?'3px solid #2563eb':'3px solid transparent' }}
+                onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = '#f4f4f3' }}
+                onMouseLeave={e => { e.currentTarget.style.background = isActive?'#eff6ff':i%2===0?'#fff':'#f9f9f8' }}>
+                <div style={{ display:'flex', alignItems:'flex-start', gap:'10px' }}>
+                  <div style={{ width:'30px', height:'30px', borderRadius:'50%', background:'#eff6ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:'600', color:'#1d4ed8', flexShrink:0 }}>
+                    {initials(s.author?.full_name)}
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'4px', flexWrap:'wrap' }}>
+                      <span style={{ fontSize:'12px', fontWeight:'600', color:'#111' }}>{s.author?.full_name || 'Nieznany'}</span>
+                      <span style={{ fontSize:'10px', color:'#9ca3af' }}>{fmtDT(s.created_at)}</span>
+                      <span style={{ fontSize:'10px', fontWeight:'500', padding:'2px 7px', borderRadius:'20px', background:cat.bg, color:cat.color }}>{cat.label}</span>
+                    </div>
+                    <div style={{ fontSize:'13px', color:'#374151', lineHeight:'1.5', overflow:'hidden', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical' }}>{s.content}</div>
+                  </div>
+                  {(isOwn || isAdmin) && (
+                    <button onClick={e => { e.stopPropagation(); deleteSuggestion(s.id) }} style={{ ...S.btnSm('red'), flexShrink:0, opacity:0.6 }}>Usun</button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
+
+      {/* RIGHT — detail panel */}
+      {selected && (
+        <div style={{ width:'380px', background:'#fff', borderLeft:'1px solid #e8e8e6', display:'flex', flexDirection:'column', flexShrink:0 }}>
+          <div style={{ padding:'14px 16px', borderBottom:'1px solid #e8e8e6', display:'flex', alignItems:'center', gap:'10px' }}>
+            <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:'#eff6ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:'600', color:'#1d4ed8', flexShrink:0 }}>
+              {initials(selected.author?.full_name)}
+            </div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ fontSize:'13px', fontWeight:'600', color:'#111' }}>{selected.author?.full_name}</div>
+              <div style={{ fontSize:'11px', color:'#9ca3af' }}>{fmtDT(selected.created_at)}</div>
+            </div>
+            <span style={{ fontSize:'10px', fontWeight:'500', padding:'2px 8px', borderRadius:'20px', background:catMeta(selected.category).bg, color:catMeta(selected.category).color }}>{catMeta(selected.category).label}</span>
+            <button onClick={() => setSelected(null)} style={{ border:'none', background:'#f4f4f3', borderRadius:'5px', width:'24px', height:'24px', cursor:'pointer', color:'#9ca3af', fontSize:'16px', display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
+          </div>
+          <div style={{ padding:'14px 16px', borderBottom:'1px solid #e8e8e6' }}>
+            <div style={{ fontSize:'13px', color:'#374151', lineHeight:'1.7', whiteSpace:'pre-wrap' }}>{selected.content}</div>
+          </div>
+          <div style={{ padding:'12px 16px', borderBottom:'1px solid #e8e8e6' }}>
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'8px' }}>
+              <span style={{ fontSize:'10px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:'500' }}>Pliki ({files.length})</span>
+              <button onClick={() => fileRef.current?.click()} disabled={uploading} style={{ ...S.btnSm('green'), fontSize:'11px', padding:'3px 9px' }}>
+                {uploading ? 'Wgrywanie...' : '+ Dodaj plik'}
+              </button>
+              <input ref={fileRef} type="file" style={{ display:'none' }} onChange={uploadFile} />
+            </div>
+            {files.length === 0 && <div style={{ fontSize:'12px', color:'#d1d5db', fontStyle:'italic' }}>Brak plikow</div>}
+            {files.map(file => (
+              <div key={file.name} style={{ display:'flex', alignItems:'center', gap:'8px', padding:'6px 10px', border:'1px solid #e8e8e6', borderRadius:'7px', marginBottom:'5px', background:'#fafaf9' }}>
+                <span style={{ fontSize:'12px', color:'#374151', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{file.name.replace(/^\d+_/, '')}</span>
+                <button onClick={() => getFileUrl(file.name)} style={S.btnSm()}>↓</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>
+            <div style={{ fontSize:'10px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:'500', marginBottom:'10px' }}>Komentarze ({comments.length})</div>
+            {comments.length === 0 && <div style={{ fontSize:'12px', color:'#9ca3af', fontStyle:'italic', marginBottom:'10px' }}>Brak komentarzy</div>}
+            {comments.map(c => (
+              <div key={c.id} style={{ marginBottom:'10px', display:'flex', gap:'8px' }}>
+                <div style={{ width:'24px', height:'24px', borderRadius:'50%', background:'#eff6ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'9px', fontWeight:'600', color:'#1d4ed8', flexShrink:0 }}>
+                  {initials(c.author?.full_name)}
+                </div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:'11px', color:'#9ca3af', marginBottom:'2px' }}>{c.author?.full_name} · {fmtDT(c.created_at)}</div>
+                  <div style={{ fontSize:'12px', color:'#111', lineHeight:'1.5', padding:'7px 10px', background:'#fafaf9', borderRadius:'7px', border:'1px solid #f0f0ee' }}>{c.content}</div>
+                </div>
+              </div>
+            ))}
+            <div style={{ display:'flex', gap:'6px', marginTop:'8px' }}>
+              <input value={newComment} onChange={e => setNewComment(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && sendComment()}
+                placeholder="Dodaj komentarz... (Enter)"
+                style={{ ...S.input, flex:1, fontSize:'12px' }} />
+              <button onClick={sendComment} disabled={sendingCmt || !newComment.trim()}
+                style={{ ...S.btnPrimary, fontSize:'12px', padding:'8px 12px', opacity:(!newComment.trim()||sendingCmt)?0.4:1 }}>+</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
