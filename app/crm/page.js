@@ -65,8 +65,6 @@ const emptyForm = {
   segment:'b2b', status:'lead', source:'google', marketplace:'', notes:'',
   assigned_to:'', ltv:'', last_order_date:'', workspace:'jamo_healthy', is_vip:false, is_problematic:false
 }
-
-// AI Assistant
 function AIAssistant({ clients, onFilterResults, lang }) {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState([{
@@ -78,10 +76,10 @@ function AIAssistant({ clients, onFilterResults, lang }) {
   const messagesEndRef = useRef(null)
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
   const now = new Date()
-
   function buildClientSummary(clients) {
     const today = new Date()
-    return clients.map(c => ({
+    const sorted = [...clients].sort((a, b) => new Date(b.last_order_date || 0) - new Date(a.last_order_date || 0))
+    return sorted.slice(0, 500).map(c => ({
       id: c.id,
       name: c.company_name || c.contact_name,
       segment: c.segment,
@@ -97,7 +95,6 @@ function AIAssistant({ clients, onFilterResults, lang }) {
       top_product: c.top_products?.[0]?.name?.substring(0, 40) || null,
     }))
   }
-
   async function sendMessage() {
     if (!input.trim() || loading) return
     const userMsg = input.trim()
@@ -119,15 +116,14 @@ function AIAssistant({ clients, onFilterResults, lang }) {
       }
       const systemPrompt = `Jesteś asystentem CRM dla Jamo Packaging Solutions (UK).
 STATYSTYKI: ${stats.total} klientów, B2B:${stats.b2b}, B2C:${stats.b2c}, VIP:${stats.vip}, Aktywni:${stats.active}, At risk:${stats.at_risk}, Churned:${stats.churned}, Avg health:${stats.avg_health}, Avg LTV:£${stats.avg_ltv}
-DANE KLIENTÓW: ${JSON.stringify(clientSummary.slice(0, 500), null, 0)}
+DANE KLIENTÓW (500 najnowszych wg ostatniego zamówienia): ${JSON.stringify(clientSummary, null, 0)}
 ZASADY:
 1. Odpowiadaj po polsku, konkretnie
-2. Data: ${now.toISOString().split('T')[0]}
+2. Dzisiejsza data: ${now.toISOString().split('T')[0]}
 3. Jeśli pytanie wymaga pokazania konkretnych klientów, dodaj NA SAMYM KOŃCU odpowiedzi TYLKO tę linię (nic więcej po niej):
 FILTER_IDS:["id1","id2"]
 4. ABSOLUTNIE ZAKAZ używania tagów XML, FILTER_RESULT, ani żadnych innych tagów
 5. Segmenty: Active<=90dni, AtRisk=90-180dni, Churned>180dni`
-
       const response = await fetch('/api/ai-crm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -141,52 +137,30 @@ FILTER_IDS:["id1","id2"]
       })
       const data = await response.json()
       const aiText = data.content?.[0]?.text || 'Przepraszam, błąd zapytania.'
-
-      // Robust extraction - find last occurrence of FILTER_IDS
       const lastFilterIdx = aiText.lastIndexOf('FILTER_IDS:[')
       let cleanText = aiText
       let filterIds = null
-
       if (lastFilterIdx !== -1) {
         const beforeFilter = aiText.substring(0, lastFilterIdx).trim()
         const filterPart = aiText.substring(lastFilterIdx)
-        // Extract the JSON array
         const arrEnd = filterPart.indexOf(']')
         if (arrEnd !== -1) {
-          try {
-            filterIds = JSON.parse(filterPart.substring('FILTER_IDS:'.length, arrEnd + 1))
-          } catch(e) {}
+          try { filterIds = JSON.parse(filterPart.substring('FILTER_IDS:'.length, arrEnd + 1)) } catch(e) {}
         }
         cleanText = beforeFilter
       }
-
-      // Also strip any remaining XML artifacts
-      cleanText = cleanText
-        .replace(/<FILTER_RESULT[\s\S]*$/g, '')
-        .replace(/FILTER_IDS:\[[\s\S]*?\]/g, '')
-        .trim()
-
+      cleanText = cleanText.replace(/<FILTER_RESULT[\s\S]*$/g, '').replace(/FILTER_IDS:\[[\s\S]*?\]/g, '').trim()
       if (filterIds && filterIds.length > 0) {
         onFilterResults(filterIds, userMsg)
         cleanText += `\n\n✅ Pokazuję ${filterIds.length} klientów w tabeli poniżej.`
       }
-
       setMessages(prev => [...prev, { role: 'assistant', content: cleanText }])
     } catch (err) {
       setMessages(prev => [...prev, { role: 'assistant', content: `❌ Błąd: ${err.message}` }])
     }
     setLoading(false)
   }
-
-  const suggestions = [
-    'Kto nie zamawiał od 3 miesięcy?',
-    'Pokaż VIP-ów B2B',
-    'Klienci z health score powyżej 70',
-    'Kto powinien wkrótce zamówić?',
-    'Top 10 LTV',
-    'Jednorazowi klienci B2B',
-  ]
-
+  const suggestions = ['Kto nie zamawiał od 3 miesięcy?','Pokaż VIP-ów B2B','Klienci z health score powyżej 70','Kto powinien wkrótce zamówić?','Top 10 LTV','Jednorazowi klienci B2B']
   return (
     <div style={{ marginBottom:'14px' }}>
       <button onClick={() => setOpen(v => !v)}
@@ -219,24 +193,16 @@ FILTER_IDS:["id1","id2"]
           </div>
           <div style={{ padding:'8px 14px', borderTop:'1px solid #f0f0ee', display:'flex', gap:'5px', flexWrap:'wrap' }}>
             {suggestions.map(s => (
-              <button key={s} onClick={() => setInput(s)}
-                style={{ padding:'3px 9px', background:'#f4f4f3', border:'1px solid #e8e8e6', borderRadius:'20px', fontSize:'11px', cursor:'pointer', color:'#374151', ...F }}>
-                {s}
-              </button>
+              <button key={s} onClick={() => setInput(s)} style={{ padding:'3px 9px', background:'#f4f4f3', border:'1px solid #e8e8e6', borderRadius:'20px', fontSize:'11px', cursor:'pointer', color:'#374151', ...F }}>{s}</button>
             ))}
           </div>
           <div style={{ padding:'10px 14px', borderTop:'1px solid #f0f0ee', display:'flex', gap:'8px' }}>
             <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()}
-              placeholder="Zapytaj o klientów... (Enter)"
-              style={{ flex:1, padding:'8px 12px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', outline:'none', ...F }} />
+              placeholder="Zapytaj o klientów... (Enter)" style={{ flex:1, padding:'8px 12px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', outline:'none', ...F }} />
             <button onClick={sendMessage} disabled={loading || !input.trim()}
-              style={{ padding:'8px 14px', background: loading || !input.trim() ? '#9ca3af' : '#111', color:'white', border:'none', borderRadius:'8px', cursor: loading || !input.trim() ? 'default' : 'pointer', fontSize:'13px', fontWeight:'500', ...F }}>
-              Wyślij
-            </button>
+              style={{ padding:'8px 14px', background: loading || !input.trim() ? '#9ca3af' : '#111', color:'white', border:'none', borderRadius:'8px', cursor: loading || !input.trim() ? 'default' : 'pointer', fontSize:'13px', fontWeight:'500', ...F }}>Wyślij</button>
             <button onClick={() => { onFilterResults(null, ''); setMessages([messages[0]]) }}
-              style={{ padding:'8px 11px', background:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca', borderRadius:'8px', cursor:'pointer', fontSize:'12px', ...F }}>
-              Reset
-            </button>
+              style={{ padding:'8px 11px', background:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca', borderRadius:'8px', cursor:'pointer', fontSize:'12px', ...F }}>Reset</button>
           </div>
         </div>
       )}
@@ -244,7 +210,6 @@ FILTER_IDS:["id1","id2"]
     </div>
   )
 }
-
 export default function CRM() {
   const router = useRouter()
   const [user, setUser] = useState(null)
@@ -271,7 +236,6 @@ export default function CRM() {
   const [noteType, setNoteType] = useState('note')
   const [savingNote, setSavingNote] = useState(false)
   const [showAlerts, setShowAlerts] = useState(true)
-  const [viewMode, setViewMode] = useState('list')
   const [blSyncing, setBlSyncing] = useState(false)
   const [blResult, setBlResult] = useState(null)
   const [blDays, setBlDays] = useState(30)
@@ -281,7 +245,6 @@ export default function CRM() {
   const [resetConfirmText, setResetConfirmText] = useState('')
   const [resetting, setResetting] = useState(false)
   const isAdmin = user?.id === ADMIN_ID
-
   useEffect(() => {
     const saved = localStorage.getItem('tf_lang'); if (saved) setLang(saved)
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -291,7 +254,6 @@ export default function CRM() {
     })
     supabase.from('profiles').select('id, full_name').then(({ data }) => setUsers(data || []))
   }, [])
-
   const loadClients = useCallback(async () => {
     setLoading(true)
     const { data } = await supabase.from('clients')
@@ -301,50 +263,37 @@ export default function CRM() {
     setClients(data || [])
     setLoading(false)
   }, [])
-
   useEffect(() => { loadClients() }, [loadClients])
-
   function handleSort(key) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortKey(key); setSortDir('asc') }
   }
-
   function SortIcon({ col }) {
     if (sortKey !== col) return <span style={{ color:'#d1d5db', marginLeft:'3px' }}>↕</span>
     return <span style={{ color:'#2563eb', marginLeft:'3px' }}>{sortDir === 'asc' ? '↑' : '↓'}</span>
   }
-
   async function loadInteractions(clientId) {
-    const { data } = await supabase.from('client_interactions')
-      .select('*, author:profiles!created_by(full_name)')
-      .eq('client_id', clientId)
-      .order('created_at', { ascending: false })
+    const { data } = await supabase.from('client_interactions').select('*, author:profiles!created_by(full_name)').eq('client_id', clientId).order('created_at', { ascending: false })
     setInteractions(data || [])
   }
-
   async function openDetail(client) {
     setSelectedClient(client); setShowDetail(true); setDetailTab('timeline')
     await loadInteractions(client.id); await loadClientTasks(client.id)
   }
-
   async function loadClientTasks(clientId) {
     const { data } = await supabase.from('tasks').select('*').eq('client_id', clientId).order('created_at', { ascending: false })
     setClientTasks(data || [])
   }
-
   async function createTaskForClient() {
     if (!selectedClient) return
     router.push('/dashboard?client_id=' + selectedClient.id + '&client_name=' + encodeURIComponent(selectedClient.company_name || selectedClient.contact_name))
   }
-
   function openNew() { setEditingClient(null); setForm({ ...emptyForm, assigned_to: user?.id || '' }); setShowModal(true) }
-
   function openEdit(client) {
     setEditingClient(client)
     setForm({ company_name:client.company_name||'', contact_name:client.contact_name||'', email:client.email||'', phone:client.phone||'', whatsapp:client.whatsapp||'', segment:client.segment||'b2b', status:client.status||'lead', source:client.source||'google', marketplace:client.marketplace||'', notes:client.notes||'', assigned_to:client.assigned_to||'', ltv:client.ltv||'', last_order_date:client.last_order_date||'', workspace:client.workspace||'jamo_healthy', is_vip:client.is_vip||false, is_problematic:client.is_problematic||false })
     setShowModal(true)
   }
-
   async function handleSave() {
     if (!form.contact_name.trim()) return
     setSaving(true)
@@ -357,13 +306,11 @@ export default function CRM() {
     }
     setSaving(false); setShowModal(false); loadClients()
   }
-
   async function handleDelete(id) {
     if (!confirm('Usunac tego klienta? Tej operacji nie mozna cofnac.')) return
     await supabase.from('clients').delete().eq('id', id)
     setShowDetail(false); loadClients()
   }
-
   async function addNote() {
     if (!newNote.trim() || !selectedClient) return
     setSavingNote(true)
@@ -371,13 +318,11 @@ export default function CRM() {
     await supabase.from('clients').update({ last_contact_date:new Date().toISOString().split('T')[0] }).eq('id', selectedClient.id)
     setNewNote(''); await loadInteractions(selectedClient.id); loadClients(); setSavingNote(false)
   }
-
   async function changeStatus(clientId, status) {
     await supabase.from('clients').update({ status }).eq('id', clientId)
     loadClients()
     if (selectedClient?.id === clientId) setSelectedClient(prev => ({ ...prev, status }))
   }
-
   async function syncBaseLinker() {
     setBlSyncing(true); setBlResult(null)
     try {
@@ -386,7 +331,6 @@ export default function CRM() {
     } catch (e) { setBlResult({ error:e.message }) }
     setBlSyncing(false)
   }
-
   async function resetAndSync() {
     if (resetConfirmText !== 'RESET') return
     setResetting(true); setBlResult(null); setShowResetModal(false); setResetConfirmText('')
@@ -396,21 +340,16 @@ export default function CRM() {
     } catch (e) { setBlResult({ error:e.message }) }
     setResetting(false)
   }
-
   async function autoFlagInactive() {
     const toFlag = clients.filter(c => c.segment==='b2b' && c.status==='active' && daysSince(c.last_contact_date)>=90)
     for (const c of toFlag) await supabase.from('clients').update({ status:'inactive' }).eq('id', c.id)
     if (toFlag.length > 0) loadClients()
   }
-
   function handleAIFilter(ids, label) {
     setAiFilterIds(ids); setAiFilterLabel(label)
     if (ids) { setSegFilter('all'); setStatusFilter('all'); setSearch('') }
   }
-
   const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : null
-
-  // Sort + filter
   const sortVal = (c) => {
     switch(sortKey) {
       case 'name': return (c.company_name || c.contact_name || '').toLowerCase()
@@ -425,7 +364,6 @@ export default function CRM() {
       default: return c.created_at || ''
     }
   }
-
   const filtered = clients
     .filter(c => {
       if (aiFilterIds) return aiFilterIds.includes(c.id)
@@ -443,22 +381,13 @@ export default function CRM() {
       if (av > bv) return sortDir === 'asc' ? 1 : -1
       return 0
     })
-
-  const counts = {
-    all: clients.length,
-    b2b: clients.filter(c => c.segment==='b2b').length,
-    b2c: clients.filter(c => c.segment==='b2c').length,
-    giftbox: clients.filter(c => c.segment==='giftbox').length,
-    vip: clients.filter(c => c.is_vip).length,
-  }
-
+  const counts = { all:clients.length, b2b:clients.filter(c=>c.segment==='b2b').length, b2c:clients.filter(c=>c.segment==='b2c').length, giftbox:clients.filter(c=>c.segment==='giftbox').length, vip:clients.filter(c=>c.is_vip).length }
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('pl-PL') : '—'
   const fmtDT = (d) => d ? new Date(d).toLocaleString('pl-PL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''
   const initials = (n) => (n||'?').split(' ').map(x=>x[0]).join('').toUpperCase().substring(0,2)
   const interactionIcon = { note:'📝', call:'📞', email:'✉️', meeting:'🤝', order:'📦', complaint:'⚠️', quote:'💰' }
-
   const alerts = clients.filter(c => {
-    if (c.segment!=='b2b' && c.segment!=='giftbox') return false
+    if (c.segment!=='b2b'&&c.segment!=='giftbox') return false
     if (c.status==='lost'||c.status==='done') return false
     const days = daysSince(c.last_contact_date)
     return (c.status==='active'&&days>=90)||(c.status==='quote'&&days>=7)||(c.status==='sample'&&days>=10)||(c.status==='contact'&&days>=5)||(c.status==='lead'&&days>=3)
@@ -466,92 +395,66 @@ export default function CRM() {
     const days = daysSince(c.last_contact_date)
     const messages = { active:`Brak kontaktu od ${days} dni`, quote:`Wycena bez odpowiedzi ${days} dni`, sample:`Probka ${days} dni temu`, contact:`W kontakcie ${days} dni`, lead:`Lead bez kontaktu ${days} dni` }
     return { client:c, message:messages[c.status]||`Brak kontaktu ${days} dni`, days, urgent:days>=90||(c.status==='quote'&&days>=14) }
-  }).sort((a,b) => b.days-a.days)
-
+  }).sort((a,b)=>b.days-a.days)
   const S = {
     page: { display:'flex', height:'100vh', ...F, fontSize:'14px', background:'#f5f5f3' },
     topbar: { background:'#fff', borderBottom:'1px solid #e8e8e6', padding:'0 24px', height:'56px', display:'flex', alignItems:'center', gap:'12px', flexShrink:0 },
     content: { flex:1, overflow:'auto', padding:'20px 24px' },
     card: { background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', overflow:'hidden' },
-    th: (col) => ({ fontSize:'10px', color: sortKey===col ? '#2563eb' : '#9ca3af', fontWeight:'500', textTransform:'uppercase', letterSpacing:'0.06em', cursor:'pointer', userSelect:'none', display:'flex', alignItems:'center' }),
+    th: (col) => ({ fontSize:'10px', color:sortKey===col?'#2563eb':'#9ca3af', fontWeight:'500', textTransform:'uppercase', letterSpacing:'0.06em', cursor:'pointer', userSelect:'none', display:'flex', alignItems:'center' }),
     input: { width:'100%', padding:'8px 11px', border:'1px solid #e8e8e6', borderRadius:'7px', fontSize:'13px', outline:'none', ...F, color:'#111', background:'#fff' },
     select: { width:'100%', padding:'8px 11px', border:'1px solid #e8e8e6', borderRadius:'7px', fontSize:'13px', outline:'none', ...F, color:'#111', background:'#fff' },
     btnPrimary: { background:'#111', color:'white', border:'none', borderRadius:'8px', padding:'8px 16px', fontSize:'13px', fontWeight:'500', cursor:'pointer', ...F },
-    btnSm: (v) => ({ padding:'4px 9px', fontSize:'11px', borderRadius:'6px', cursor:'pointer', ...F, fontWeight:'500', border: v==='red'?'1px solid #fecaca':v==='green'?'1px solid #bbf7d0':v==='blue'?'1px solid #bfdbfe':'1px solid #e8e8e6', background: v==='red'?'#fef2f2':v==='green'?'#f0fdf4':v==='blue'?'#eff6ff':'#fff', color: v==='red'?'#dc2626':v==='green'?'#16a34a':v==='blue'?'#1d4ed8':'#374151' }),
+    btnSm: (v) => ({ padding:'4px 9px', fontSize:'11px', borderRadius:'6px', cursor:'pointer', ...F, fontWeight:'500', border:v==='red'?'1px solid #fecaca':v==='green'?'1px solid #bbf7d0':v==='blue'?'1px solid #bfdbfe':'1px solid #e8e8e6', background:v==='red'?'#fef2f2':v==='green'?'#f0fdf4':v==='blue'?'#eff6ff':'#fff', color:v==='red'?'#dc2626':v==='green'?'#16a34a':v==='blue'?'#1d4ed8':'#374151' }),
     overlay: { position:'fixed', inset:0, background:'rgba(0,0,0,0.35)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:50 },
     modal: (w) => ({ background:'#fff', borderRadius:'14px', width:w||'520px', maxWidth:'95vw', maxHeight:'90vh', overflowY:'auto', border:'1px solid #e8e8e6' }),
     label: { display:'block', fontSize:'12px', fontWeight:'500', marginBottom:'4px', color:'#374151' },
     grid2: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'12px' },
   }
-
   const cols = '1fr 70px 100px 90px 70px 70px 70px 110px'
   const headers = [
-    { key:'name', label:'Klient' },
-    { key:'segment', label:'Seg.' },
-    { key:'status', label:'Status' },
-    { key:'ltv', label:'LTV' },
-    { key:'order_count', label:'Zam.' },
-    { key:'avg_order_value', label:'AOV' },
-    { key:'health_score', label:'Health' },
-    { key:'last_contact_date', label:'Ost. kontakt' },
+    { key:'name', label:'Klient' },{ key:'segment', label:'Seg.' },{ key:'status', label:'Status' },
+    { key:'ltv', label:'LTV' },{ key:'order_count', label:'Zam.' },{ key:'avg_order_value', label:'AOV' },
+    { key:'health_score', label:'Health' },{ key:'last_contact_date', label:'Ost. kontakt' },
   ]
-
   return (
     <div style={S.page}>
       <div style={{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }}>
-        {/* TOPBAR */}
         <div style={S.topbar}>
           <button onClick={() => router.push('/dashboard')} style={{ border:'none', background:'none', cursor:'pointer', color:'#9ca3af', fontSize:'20px', lineHeight:'1', padding:'0' }}>←</button>
           <span style={{ fontSize:'15px', fontWeight:'600', letterSpacing:'-0.3px', color:'#111', flex:1 }}>CRM</span>
           <div style={{ display:'flex', gap:'6px' }}>
             {Object.entries(SEGMENTS).map(([k,v]) => (
               <button key={k} onClick={() => { setSegFilter(k); setStatusFilter('all'); setAiFilterIds(null) }}
-                style={{ padding:'5px 12px', borderRadius:'7px', fontSize:'12px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor: segFilter===k&&!aiFilterIds?v.color:'#e8e8e6', background: segFilter===k&&!aiFilterIds?v.bg:'#fff', color: segFilter===k&&!aiFilterIds?v.color:'#6b7280', ...F }}>
+                style={{ padding:'5px 12px', borderRadius:'7px', fontSize:'12px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor:segFilter===k&&!aiFilterIds?v.color:'#e8e8e6', background:segFilter===k&&!aiFilterIds?v.bg:'#fff', color:segFilter===k&&!aiFilterIds?v.color:'#6b7280', ...F }}>
                 {v.label} <span style={{ marginLeft:'4px', fontWeight:'600' }}>{counts[k]}</span>
               </button>
             ))}
             <button onClick={() => { setSegFilter('all'); setAiFilterIds(null) }}
-              style={{ padding:'5px 12px', borderRadius:'7px', fontSize:'12px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor: segFilter==='all'&&!aiFilterIds?'#111':'#e8e8e6', background: segFilter==='all'&&!aiFilterIds?'#111':'#fff', color: segFilter==='all'&&!aiFilterIds?'white':'#6b7280', ...F }}>
+              style={{ padding:'5px 12px', borderRadius:'7px', fontSize:'12px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor:segFilter==='all'&&!aiFilterIds?'#111':'#e8e8e6', background:segFilter==='all'&&!aiFilterIds?'#111':'#fff', color:segFilter==='all'&&!aiFilterIds?'white':'#6b7280', ...F }}>
               Wszyscy <span style={{ marginLeft:'4px' }}>{counts.all}</span>
             </button>
           </div>
           <input value={search} onChange={e => { setSearch(e.target.value); setAiFilterIds(null) }} placeholder="Szukaj klienta..." style={{ ...S.input, width:'200px' }} />
           <button onClick={openNew} style={S.btnPrimary}>+ Nowy klient</button>
         </div>
-
         <div style={S.content}>
-          {/* STATS */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'10px', marginBottom:'16px' }}>
-            {[
-              { label:'Wszyscy', val:counts.all, color:'#111' },
-              { label:'Jamo B2B', val:counts.b2b, color:'#1d4ed8' },
-              { label:'Healthy Future', val:counts.b2c, color:'#065f46' },
-              { label:'GiftBox', val:counts.giftbox, color:'#6d28d9' },
-              { label:'VIP', val:counts.vip, color:'#92400e' },
-            ].map(s => (
+            {[{label:'Wszyscy',val:counts.all,color:'#111'},{label:'Jamo B2B',val:counts.b2b,color:'#1d4ed8'},{label:'Healthy Future',val:counts.b2c,color:'#065f46'},{label:'GiftBox',val:counts.giftbox,color:'#6d28d9'},{label:'VIP',val:counts.vip,color:'#92400e'}].map(s => (
               <div key={s.label} style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', padding:'12px 16px' }}>
                 <div style={{ fontSize:'10px', color:'#9ca3af', fontWeight:'500', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'4px' }}>{s.label}</div>
                 <div style={{ fontSize:'24px', fontWeight:'600', color:s.color, letterSpacing:'-0.5px' }}>{s.val}</div>
               </div>
             ))}
           </div>
-
-          {/* AI */}
           <AIAssistant clients={clients} onFilterResults={handleAIFilter} lang={lang} />
-
-          {/* AI BANNER */}
           {aiFilterIds && (
             <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:'8px', padding:'9px 14px', marginBottom:'12px', display:'flex', alignItems:'center', gap:'8px' }}>
               <span>🤖</span>
               <span style={{ fontSize:'13px', color:'#1d4ed8', fontWeight:'500', flex:1 }}>AI filtr aktywny — {filtered.length} klientów</span>
-              <button onClick={() => { setAiFilterIds(null); setAiFilterLabel('') }}
-                style={{ fontSize:'11px', padding:'3px 10px', background:'#1d4ed8', color:'white', border:'none', borderRadius:'5px', cursor:'pointer', ...F }}>
-                Resetuj filtr
-              </button>
+              <button onClick={() => { setAiFilterIds(null); setAiFilterLabel('') }} style={{ fontSize:'11px', padding:'3px 10px', background:'#1d4ed8', color:'white', border:'none', borderRadius:'5px', cursor:'pointer', ...F }}>Resetuj filtr</button>
             </div>
           )}
-
-          {/* ALERTS */}
           {alerts.length > 0 && showAlerts && !aiFilterIds && (
             <div style={{ background:'#fff', border:'1px solid #fde68a', borderRadius:'10px', marginBottom:'12px', overflow:'hidden' }}>
               <div style={{ padding:'9px 14px', background:'#fffbeb', borderBottom:'1px solid #fde68a', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -564,23 +467,21 @@ export default function CRM() {
               <div style={{ maxHeight:'160px', overflowY:'auto' }}>
                 {alerts.slice(0,6).map(({ client:c, message, urgent }) => (
                   <div key={c.id} onClick={() => openDetail(c)}
-                    style={{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 14px', borderBottom:'1px solid #fef9c3', cursor:'pointer', background: urgent?'#fef2f2':'#fff' }}
-                    onMouseEnter={e => e.currentTarget.style.background = urgent?'#fee2e2':'#fefce8'}
-                    onMouseLeave={e => e.currentTarget.style.background = urgent?'#fef2f2':'#fff'}>
-                    <div style={{ width:'26px', height:'26px', borderRadius:'50%', background: urgent?'#fef2f2':'#fffbeb', color: urgent?'#dc2626':'#92400e', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:'600', flexShrink:0 }}>
+                    style={{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 14px', borderBottom:'1px solid #fef9c3', cursor:'pointer', background:urgent?'#fef2f2':'#fff' }}
+                    onMouseEnter={e => e.currentTarget.style.background=urgent?'#fee2e2':'#fefce8'}
+                    onMouseLeave={e => e.currentTarget.style.background=urgent?'#fef2f2':'#fff'}>
+                    <div style={{ width:'26px', height:'26px', borderRadius:'50%', background:urgent?'#fef2f2':'#fffbeb', color:urgent?'#dc2626':'#92400e', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'10px', fontWeight:'600', flexShrink:0 }}>
                       {(c.company_name||c.contact_name||'?').substring(0,2).toUpperCase()}
                     </div>
                     <div style={{ flex:1, minWidth:0 }}>
                       <div style={{ fontSize:'12px', fontWeight:'500', color:'#111' }}>{c.company_name||c.contact_name}</div>
-                      <div style={{ fontSize:'11px', color: urgent?'#dc2626':'#92400e' }}>{message}</div>
+                      <div style={{ fontSize:'11px', color:urgent?'#dc2626':'#92400e' }}>{message}</div>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
           )}
-
-          {/* BASELINKER SYNC */}
           <div style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', padding:'10px 16px', marginBottom:'12px', display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }}>
             <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
               <span style={{ fontSize:'16px' }}>🔗</span>
@@ -590,110 +491,67 @@ export default function CRM() {
               </div>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:'8px', marginLeft:'auto' }}>
-              <select value={blDays} onChange={e => setBlDays(Number(e.target.value))}
-                style={{ padding:'6px 10px', border:'1px solid #e8e8e6', borderRadius:'7px', fontSize:'12px', outline:'none', ...F }}>
-                <option value={7}>7 dni</option>
-                <option value={30}>30 dni</option>
-                <option value={90}>90 dni</option>
-                <option value={365}>Rok</option>
+              <select value={blDays} onChange={e => setBlDays(Number(e.target.value))} style={{ padding:'6px 10px', border:'1px solid #e8e8e6', borderRadius:'7px', fontSize:'12px', outline:'none', ...F }}>
+                <option value={7}>7 dni</option><option value={30}>30 dni</option><option value={90}>90 dni</option><option value={365}>Rok</option>
               </select>
-              <button onClick={syncBaseLinker} disabled={blSyncing||resetting}
-                style={{ padding:'7px 14px', background: blSyncing?'#6b7280':'#111', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'500', cursor: blSyncing?'default':'pointer', ...F }}>
-                {blSyncing ? '⏳ Synchronizuje...' : '↻ Synchronizuj'}
+              <button onClick={syncBaseLinker} disabled={blSyncing||resetting} style={{ padding:'7px 14px', background:blSyncing?'#6b7280':'#111', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'500', cursor:blSyncing?'default':'pointer', ...F }}>
+                {blSyncing?'⏳ Synchronizuje...':'↻ Synchronizuj'}
               </button>
-              {isAdmin && (
-                <button onClick={() => setShowResetModal(true)} disabled={blSyncing||resetting}
-                  style={{ padding:'7px 12px', background:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca', borderRadius:'8px', fontSize:'12px', fontWeight:'500', cursor:'pointer', ...F }}>
-                  🗑 Reset + Import
-                </button>
-              )}
-              {isAdmin && (
-                <button onClick={() => router.push('/import')}
-                  style={{ padding:'7px 12px', background:'#f0fdf4', color:'#16a34a', border:'1px solid #bbf7d0', borderRadius:'8px', fontSize:'12px', fontWeight:'500', cursor:'pointer', ...F }}>
-                  📥 Import XML
-                </button>
-              )}
+              {isAdmin && <button onClick={() => setShowResetModal(true)} disabled={blSyncing||resetting} style={{ padding:'7px 12px', background:'#fef2f2', color:'#dc2626', border:'1px solid #fecaca', borderRadius:'8px', fontSize:'12px', fontWeight:'500', cursor:'pointer', ...F }}>🗑 Reset + Import</button>}
+              {isAdmin && <button onClick={() => router.push('/import')} style={{ padding:'7px 12px', background:'#f0fdf4', color:'#16a34a', border:'1px solid #bbf7d0', borderRadius:'8px', fontSize:'12px', fontWeight:'500', cursor:'pointer', ...F }}>📥 Import XML</button>}
             </div>
             {blResult && (
-              <div style={{ width:'100%', padding:'7px 12px', borderRadius:'7px', background: blResult.error?'#fef2f2':'#f0fdf4', border:`1px solid ${blResult.error?'#fecaca':'#bbf7d0'}`, fontSize:'12px', color: blResult.error?'#dc2626':'#065f46' }}>
-                {blResult.error ? `Blad: ${blResult.error}` : `✅ ${blResult.clients_created} nowych, ${blResult.clients_updated} zaktualizowanych`}
+              <div style={{ width:'100%', padding:'7px 12px', borderRadius:'7px', background:blResult.error?'#fef2f2':'#f0fdf4', border:`1px solid ${blResult.error?'#fecaca':'#bbf7d0'}`, fontSize:'12px', color:blResult.error?'#dc2626':'#065f46' }}>
+                {blResult.error?`Blad: ${blResult.error}`:`✅ ${blResult.clients_created} nowych, ${blResult.clients_updated} zaktualizowanych`}
               </div>
             )}
           </div>
           <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-
-          {/* STATUS FILTER */}
           {segFilter !== 'all' && !aiFilterIds && (
             <div style={{ display:'flex', gap:'6px', marginBottom:'12px', flexWrap:'wrap' }}>
               <button onClick={() => setStatusFilter('all')} style={{ ...S.btnSm(statusFilter==='all'?'blue':''), fontSize:'12px', padding:'5px 12px' }}>Wszystkie</button>
               {(STATUSES[segFilter]||[]).map(s => (
                 <button key={s.key} onClick={() => setStatusFilter(s.key)}
-                  style={{ padding:'5px 12px', borderRadius:'20px', fontSize:'11px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor: statusFilter===s.key?s.color:'#e8e8e6', background: statusFilter===s.key?s.bg:'#fff', color: statusFilter===s.key?s.color:'#6b7280', ...F }}>
+                  style={{ padding:'5px 12px', borderRadius:'20px', fontSize:'11px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor:statusFilter===s.key?s.color:'#e8e8e6', background:statusFilter===s.key?s.bg:'#fff', color:statusFilter===s.key?s.color:'#6b7280', ...F }}>
                   {s.label} <span style={{ marginLeft:'4px', fontWeight:'600' }}>{clients.filter(c=>c.segment===segFilter&&c.status===s.key).length}</span>
                 </button>
               ))}
             </div>
           )}
-
-          {/* TABLE */}
           <div style={S.card}>
-            {/* SORTABLE HEADERS */}
             <div style={{ display:'grid', gridTemplateColumns:cols, padding:'9px 16px', borderBottom:'1px solid #e8e8e6', background:'#fafaf9', gap:'8px' }}>
               {headers.map(h => (
-                <div key={h.key} onClick={() => handleSort(h.key)} style={S.th(h.key)}>
-                  {h.label}<SortIcon col={h.key} />
-                </div>
+                <div key={h.key} onClick={() => handleSort(h.key)} style={S.th(h.key)}>{h.label}<SortIcon col={h.key} /></div>
               ))}
               <div style={{ fontSize:'10px', color:'#9ca3af', fontWeight:'500', textTransform:'uppercase' }}>Akcje</div>
             </div>
             {loading && <div style={{ padding:'40px', textAlign:'center', color:'#9ca3af' }}>Ladowanie...</div>}
-            {!loading && filtered.length === 0 && (
-              <div style={{ padding:'40px', textAlign:'center', color:'#9ca3af', fontSize:'13px' }}>
-                {clients.length===0 ? 'Brak klientow — dodaj pierwszego!' : 'Brak wynikow'}
-              </div>
-            )}
+            {!loading && filtered.length === 0 && <div style={{ padding:'40px', textAlign:'center', color:'#9ca3af', fontSize:'13px' }}>{clients.length===0?'Brak klientow — dodaj pierwszego!':'Brak wynikow'}</div>}
             {filtered.map((client, i) => {
               const seg = SEGMENTS[client.segment]
-              const baseBg = i%2===0 ? '#fff' : '#f7f7f5'
+              const baseBg = i%2===0?'#fff':'#f7f7f5'
               return (
                 <div key={client.id} onClick={() => openDetail(client)}
                   style={{ display:'grid', gridTemplateColumns:cols, padding:'10px 16px', borderBottom:'1px solid #f0f0ee', cursor:'pointer', background:baseBg, alignItems:'center', gap:'8px' }}
                   onMouseEnter={e => e.currentTarget.style.background='#eef2ff'}
                   onMouseLeave={e => e.currentTarget.style.background=baseBg}>
-                  {/* Name */}
                   <div>
                     <div style={{ fontSize:'13px', fontWeight:'500', color:'#111' }}>{client.company_name||client.contact_name}</div>
-                    <div style={{ fontSize:'11px', color:'#9ca3af', marginTop:'1px' }}>
-                      {client.company_name?client.contact_name:''}{client.email?' · '+client.email:''}
-                    </div>
+                    <div style={{ fontSize:'11px', color:'#9ca3af', marginTop:'1px' }}>{client.company_name?client.contact_name:''}{client.email?' · '+client.email:''}</div>
                     {client.is_vip && <span style={{ fontSize:'9px', background:'#fffbeb', color:'#92400e', border:'1px solid #fde68a', borderRadius:'4px', padding:'1px 5px', display:'inline-block', marginTop:'2px' }}>⭐ VIP</span>}
                   </div>
-                  {/* Segment */}
                   <div><span style={{ fontSize:'10px', fontWeight:'500', padding:'2px 6px', borderRadius:'5px', background:seg?.bg, color:seg?.color }}>{seg?.label}</span></div>
-                  {/* Status */}
                   <div onClick={e => e.stopPropagation()}>
                     <select value={client.status} onChange={e => { e.stopPropagation(); changeStatus(client.id, e.target.value) }}
                       style={{ ...S.select, padding:'3px 6px', fontSize:'10px', width:'auto', background:statusMeta(client.segment,client.status).bg, color:statusMeta(client.segment,client.status).color, border:'1px solid '+statusMeta(client.segment,client.status).color+'40', borderRadius:'20px', appearance:'none', cursor:'pointer', fontWeight:'500' }}>
                       {(STATUSES[client.segment]||[]).map(s=><option key={s.key} value={s.key}>{s.label}</option>)}
                     </select>
                   </div>
-                  {/* LTV */}
-                  <div style={{ fontSize:'12px', fontWeight:'500', color: client.ltv>0?'#065f46':'#9ca3af' }}>
-                    {client.ltv>0?`£${Number(client.ltv).toLocaleString()}`:'—'}
-                  </div>
-                  {/* Order count */}
+                  <div style={{ fontSize:'12px', fontWeight:'500', color:client.ltv>0?'#065f46':'#9ca3af' }}>{client.ltv>0?`£${Number(client.ltv).toLocaleString()}`:'—'}</div>
                   <div style={{ fontSize:'12px', color:'#374151', fontWeight:'500' }}>{client.order_count||'—'}</div>
-                  {/* AOV */}
-                  <div style={{ fontSize:'11px', color:'#6b7280' }}>
-                    {client.avg_order_value>0?`£${Math.round(client.avg_order_value)}`:'—'}
-                  </div>
-                  {/* Health Score */}
-                  <div style={{ minWidth:'60px' }}>
-                    {client.health_score > 0 ? <HealthBar score={client.health_score} /> : <span style={{ fontSize:'11px', color:'#d1d5db' }}>—</span>}
-                  </div>
-                  {/* Last contact */}
+                  <div style={{ fontSize:'11px', color:'#6b7280' }}>{client.avg_order_value>0?`£${Math.round(client.avg_order_value)}`:'—'}</div>
+                  <div style={{ minWidth:'60px' }}>{client.health_score>0?<HealthBar score={client.health_score}/>:<span style={{ fontSize:'11px', color:'#d1d5db' }}>—</span>}</div>
                   <div style={{ fontSize:'11px', color:'#9ca3af' }}>{fmtDate(client.last_contact_date)}</div>
-                  {/* Actions */}
                   <div style={{ display:'flex', gap:'4px' }} onClick={e => e.stopPropagation()}>
                     <button onClick={() => openEdit(client)} style={S.btnSm()}>Edytuj</button>
                     <button onClick={() => handleDelete(client.id)} style={S.btnSm('red')}>Usun</button>
@@ -702,16 +560,12 @@ export default function CRM() {
               )
             })}
           </div>
-
-          {/* WYNIKI */}
           <div style={{ padding:'8px 16px', fontSize:'12px', color:'#9ca3af' }}>
             Pokazuję {filtered.length} z {clients.length} klientów
             {sortKey !== 'created_at' && <span> · Sortowanie: {headers.find(h=>h.key===sortKey)?.label} {sortDir==='asc'?'↑':'↓'}</span>}
           </div>
         </div>
       </div>
-
-      {/* DETAIL PANEL */}
       {showDetail && selectedClient && (
         <div style={{ width:'400px', background:'#fff', borderLeft:'1px solid #e8e8e6', display:'flex', flexDirection:'column', flexShrink:0 }}>
           <div style={{ padding:'14px 16px', borderBottom:'1px solid #e8e8e6', display:'flex', alignItems:'center', gap:'10px' }}>
@@ -724,17 +578,15 @@ export default function CRM() {
             </div>
             <button onClick={() => setShowDetail(false)} style={{ border:'none', background:'#f4f4f3', borderRadius:'5px', width:'24px', height:'24px', cursor:'pointer', color:'#9ca3af', fontSize:'16px', display:'flex', alignItems:'center', justifyContent:'center' }}>×</button>
           </div>
-
           <div style={{ padding:'12px 16px', borderBottom:'1px solid #e8e8e6' }}>
-            {/* Key metrics */}
             <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'6px', marginBottom:'10px' }}>
               {[
-                { label:'LTV', val: selectedClient.ltv>0?`£${Number(selectedClient.ltv).toLocaleString()}`:'—', color:'#065f46' },
-                { label:'Zamówień', val: selectedClient.order_count||'—', color:'#1d4ed8' },
-                { label:'AOV', val: selectedClient.avg_order_value>0?`£${Math.round(selectedClient.avg_order_value)}`:'—', color:'#6d28d9' },
-                { label:'Śr. co', val: selectedClient.avg_days_between_orders?`${Math.round(selectedClient.avg_days_between_orders)}d`:'—', color:'#92400e' },
-                { label:'Wiek klienta', val: selectedClient.customer_age_days?`${Math.round(selectedClient.customer_age_days/30)}mies`:'—', color:'#0e7490' },
-                { label:'Repeat', val: selectedClient.repeat_customer?'✅ Tak':'❌ Nie', color: selectedClient.repeat_customer?'#065f46':'#dc2626' },
+                { label:'LTV', val:selectedClient.ltv>0?`£${Number(selectedClient.ltv).toLocaleString()}`:'—', color:'#065f46' },
+                { label:'Zamówień', val:selectedClient.order_count||'—', color:'#1d4ed8' },
+                { label:'AOV', val:selectedClient.avg_order_value>0?`£${Math.round(selectedClient.avg_order_value)}`:'—', color:'#6d28d9' },
+                { label:'Śr. co', val:selectedClient.avg_days_between_orders?`${Math.round(selectedClient.avg_days_between_orders)}d`:'—', color:'#92400e' },
+                { label:'Wiek klienta', val:selectedClient.customer_age_days?`${Math.round(selectedClient.customer_age_days/30)}mies`:'—', color:'#0e7490' },
+                { label:'Repeat', val:selectedClient.repeat_customer?'✅ Tak':'❌ Nie', color:selectedClient.repeat_customer?'#065f46':'#dc2626' },
               ].map(m => (
                 <div key={m.label} style={{ padding:'7px 9px', background:'#fafaf9', borderRadius:'7px', border:'1px solid #f0f0ee' }}>
                   <div style={{ fontSize:'9px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'2px' }}>{m.label}</div>
@@ -742,14 +594,12 @@ export default function CRM() {
                 </div>
               ))}
             </div>
-            {/* Health score */}
             {selectedClient.health_score > 0 && (
               <div style={{ padding:'8px 10px', background:'#fafaf9', borderRadius:'7px', border:'1px solid #f0f0ee', marginBottom:'8px' }}>
                 <div style={{ fontSize:'9px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'5px' }}>Health Score</div>
                 <HealthBar score={selectedClient.health_score} />
               </div>
             )}
-            {/* Top products */}
             {selectedClient.top_products && selectedClient.top_products.length > 0 && (
               <div style={{ padding:'8px 10px', background:'#fafaf9', borderRadius:'7px', border:'1px solid #f0f0ee', marginBottom:'8px' }}>
                 <div style={{ fontSize:'9px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:'6px' }}>Top Produkty</div>
@@ -761,7 +611,6 @@ export default function CRM() {
                 ))}
               </div>
             )}
-            {/* Contact info */}
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px', marginBottom:'8px' }}>
               {[
                 { label:'Email', val:selectedClient.email||'—' },
@@ -777,17 +626,12 @@ export default function CRM() {
                 </div>
               ))}
             </div>
-            {selectedClient.notes && (
-              <div style={{ padding:'8px 10px', background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'7px', fontSize:'12px', color:'#374151', marginBottom:'8px' }}>
-                {selectedClient.notes}
-              </div>
-            )}
+            {selectedClient.notes && <div style={{ padding:'8px 10px', background:'#fffbeb', border:'1px solid #fde68a', borderRadius:'7px', fontSize:'12px', color:'#374151', marginBottom:'8px' }}>{selectedClient.notes}</div>}
             <div style={{ display:'flex', gap:'6px' }}>
               <button onClick={() => openEdit(selectedClient)} style={{ ...S.btnPrimary, fontSize:'12px', padding:'6px 12px' }}>Edytuj</button>
               <button onClick={() => handleDelete(selectedClient.id)} style={{ ...S.btnSm('red'), fontSize:'12px', padding:'6px 12px' }}>Usun</button>
             </div>
           </div>
-
           <div style={{ display:'flex', borderBottom:'1px solid #e8e8e6', flexShrink:0 }}>
             {[{ key:'timeline', label:'Historia' },{ key:'tasks', label:`Zadania (${clientTasks.length})` }].map(tab => (
               <button key={tab.key} onClick={() => setDetailTab(tab.key)}
@@ -796,22 +640,15 @@ export default function CRM() {
               </button>
             ))}
           </div>
-
           {detailTab==='timeline' && (
             <div style={{ flex:1, overflowY:'auto', padding:'12px 16px' }}>
               <div style={{ marginBottom:'12px', padding:'10px', background:'#fafaf9', border:'1px solid #e8e8e6', borderRadius:'9px' }}>
                 <select value={noteType} onChange={e => setNoteType(e.target.value)} style={{ ...S.select, marginBottom:'7px', fontSize:'12px' }}>
-                  <option value="note">📝 Notatka</option>
-                  <option value="call">📞 Telefon</option>
-                  <option value="email">✉️ Email</option>
-                  <option value="meeting">🤝 Spotkanie</option>
-                  <option value="quote">💰 Wycena</option>
-                  <option value="order">📦 Zamowienie</option>
-                  <option value="complaint">⚠️ Reklamacja</option>
+                  <option value="note">📝 Notatka</option><option value="call">📞 Telefon</option><option value="email">✉️ Email</option>
+                  <option value="meeting">🤝 Spotkanie</option><option value="quote">💰 Wycena</option><option value="order">📦 Zamowienie</option><option value="complaint">⚠️ Reklamacja</option>
                 </select>
                 <div style={{ display:'flex', gap:'6px' }}>
-                  <input value={newNote} onChange={e => setNewNote(e.target.value)} onKeyDown={e => e.key==='Enter'&&addNote()}
-                    placeholder="Dodaj notatke... (Enter)" style={{ ...S.input, flex:1, fontSize:'12px' }} />
+                  <input value={newNote} onChange={e => setNewNote(e.target.value)} onKeyDown={e => e.key==='Enter'&&addNote()} placeholder="Dodaj notatke... (Enter)" style={{ ...S.input, flex:1, fontSize:'12px' }} />
                   <button onClick={addNote} disabled={savingNote||!newNote.trim()} style={{ ...S.btnPrimary, fontSize:'12px', padding:'8px 12px', opacity:(!newNote.trim()||savingNote)?0.4:1 }}>+</button>
                 </div>
               </div>
@@ -854,8 +691,6 @@ export default function CRM() {
           )}
         </div>
       )}
-
-      {/* NEW/EDIT MODAL */}
       {showModal && (
         <div style={S.overlay}>
           <div style={S.modal('560px')}>
@@ -867,7 +702,7 @@ export default function CRM() {
               <div style={{ display:'flex', gap:'6px', marginBottom:'16px' }}>
                 {Object.entries(SEGMENTS).map(([k,v]) => (
                   <button key={k} onClick={() => setForm(f => ({ ...f, segment:k, status:STATUSES[k][0].key }))}
-                    style={{ flex:1, padding:'8px', borderRadius:'8px', border:'2px solid', borderColor: form.segment===k?v.color:'#e8e8e6', background: form.segment===k?v.bg:'#fafaf9', color: form.segment===k?v.color:'#6b7280', fontSize:'12px', fontWeight:'500', cursor:'pointer', ...F }}>
+                    style={{ flex:1, padding:'8px', borderRadius:'8px', border:'2px solid', borderColor:form.segment===k?v.color:'#e8e8e6', background:form.segment===k?v.bg:'#fafaf9', color:form.segment===k?v.color:'#6b7280', fontSize:'12px', fontWeight:'500', cursor:'pointer', ...F }}>
                     {v.label}
                   </button>
                 ))}
@@ -923,8 +758,6 @@ export default function CRM() {
           </div>
         </div>
       )}
-
-      {/* RESET MODAL */}
       {showResetModal && isAdmin && (
         <div style={S.overlay}>
           <div style={{ background:'#fff', borderRadius:'14px', width:'440px', maxWidth:'95vw', border:'2px solid #fecaca', padding:'24px' }}>
@@ -936,8 +769,7 @@ export default function CRM() {
               </div>
             </div>
             <div style={{ background:'#fef2f2', border:'1px solid #fecaca', borderRadius:'8px', padding:'12px', marginBottom:'16px', fontSize:'12px', color:'#dc2626', lineHeight:'1.6' }}>
-              Usunieci: {clients.length} klientow + historia interakcji.<br/>
-              <strong>Tej operacji nie mozna cofnac!</strong>
+              Usunieci: {clients.length} klientow + historia interakcji.<br/><strong>Tej operacji nie mozna cofnac!</strong>
             </div>
             <div style={{ marginBottom:'16px' }}>
               <label style={{ ...S.label, color:'#dc2626' }}>Wpisz RESET:</label>
