@@ -297,7 +297,7 @@ export default function CRM() {
     const { data } = await supabase.from('clients')
       .select('*, assigned:profiles!assigned_to(full_name)')
       .order('created_at', { ascending: false })
-      .limit(5000)
+      .limit(10000)
     setClients(data || [])
     setLoading(false)
   }, [])
