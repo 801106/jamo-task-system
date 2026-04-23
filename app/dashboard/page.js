@@ -5,7 +5,6 @@ import { supabase } from '../../lib/supabase'
 import { useRouter } from 'next/navigation'
 
 const ADMIN_ID = 'd53f6727-6bc7-4602-9ce0-4fc31ab3aba1'
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || ''
 
 const WORKSPACES = [
   { key: 'jamo_healthy', label: 'Jamo + Healthy' },
@@ -22,10 +21,18 @@ const STATUS_META = {
 }
 const PRIO_DOT = { high:'#ef4444', med:'#f59e0b', low:'#22c55e' }
 
+const SUGGESTION_CATEGORIES = [
+  { key:'general', label:'Ogólne', color:'#6b7280', bg:'#f3f4f6' },
+  { key:'crm', label:'CRM', color:'#1d4ed8', bg:'#eff6ff' },
+  { key:'taskflow', label:'TaskFlow', color:'#6d28d9', bg:'#f5f3ff' },
+  { key:'bug', label:'Błąd', color:'#dc2626', bg:'#fef2f2' },
+  { key:'feature', label:'Nowa funkcja', color:'#065f46', bg:'#ecfdf5' },
+]
+
 const T = {
   pl: {
     appSub:'Jamo Operations', ws:'Obszar roboczy',
-    all:'Wszystkie', mine:'Moje', open:'Otwarte', urgent:'Pilne', archive:'Archiwum',
+    all:'Wszystkie', mine:'Moje', open:'Otwarte', urgent:'Pilne', archive:'Archiwum', suggestions:'Sugestie',
     search:'Szukaj...', newTask:'Nowe zadanie',
     live:'Polaczono — sync na zywo',
     admin:'Admin', user:'Uzytkownik', account:'Moje konto', logout:'Wyloguj',
@@ -40,54 +47,21 @@ const T = {
     f_desc:'Opis / Nastepny krok', f_deadline:'Termin wykonania', f_marketplace:'Marketplace',
     cancel:'Anuluj', save:'Zapisz', saveChanges:'Zapisz zmiany', saving:'Zapisywanie...',
     high:'Wysoki', med:'Sredni', low:'Niski',
-    attach:'Zalaczniki', noFiles:'Brak plikow — kliknij Dodaj plik',
+    attach:'Zalaczniki', noFiles:'Brak plikow',
     addFile:'Dodaj plik', uploading:'Wgrywanie...', download:'Pobierz',
     delConfirm:'Usunac to zadanie?', delFileConfirm:'Usunac ten plik?',
     comments:'Komentarze', addComment:'Dodaj komentarz...', send:'Wyslij',
     noComments:'Brak komentarzy', overdue:'Przeterminowane',
     moveTitle:'Przenies zadanie', moveTo:'Przenies do:',
     archiveNote:'Zamkniete zadania trafiaja do archiwum',
-    notifOn:'Powiadomienia wlaczone', notifOff:'Wlacz powiadomienia', notifBlocked:'Powiadomienia zablokowane',
-    descLabel:'Opis', assignedTo:'Przypisano do',
-    notifications:'Powiadomienia', markAllRead:'Oznacz wszystkie jako przeczytane', noNotifs:'Brak nowych powiadomien',
+    notifications:'Powiadomienia', markAllRead:'Oznacz wszystkie', noNotifs:'Brak powiadomien',
+    suggestionsTitle:'Sugestie i usprawnienia',
+    suggestionsDesc:'Podziel sie pomyslem na ulepszenie systemu',
+    addSuggestion:'Dodaj sugestie...',
+    submitSuggestion:'Dodaj',
+    noSuggestions:'Brak sugestii — bądź pierwszy!',
+    category:'Kategoria',
   },
-  en: {
-    appSub:'Jamo Operations', ws:'Workspace',
-    all:'All', mine:'Mine', open:'Open', urgent:'Urgent', archive:'Archive',
-    search:'Search...', newTask:'New task',
-    live:'Connected — live sync',
-    admin:'Admin', user:'User', account:'My account', logout:'Logout',
-    reports:'Reports', adminPanel:'Admin panel',
-    col1:'Order no.', col2:'Task', col3:'Marketplace', col4:'Status', col5:'Assigned', col6:'Prio', col7:'Deadline', col8:'Actions',
-    noTasks:'No tasks', noArchive:'No archived tasks',
-    files:'Files', edit:'Edit', del:'Delete', move:'Move',
-    editTask:'Edit task', newTaskTitle:'New task',
-    f_order:'Order number', f_claim:'Claim number', f_product:'Product name *',
-    f_sku:'SKU', f_client:'Client', f_cat:'Category', f_prio:'Priority',
-    f_status:'Status', f_assign:'Assign to', f_none:'— Unassigned —',
-    f_desc:'Description / Next step', f_deadline:'Deadline', f_marketplace:'Marketplace',
-    cancel:'Cancel', save:'Save', saveChanges:'Save changes', saving:'Saving...',
-    high:'High', med:'Medium', low:'Low',
-    attach:'Attachments', noFiles:'No files — click Add file',
-    addFile:'Add file', uploading:'Uploading...', download:'Download',
-    delConfirm:'Delete this task?', delFileConfirm:'Delete this file?',
-    comments:'Comments', addComment:'Add a comment...', send:'Send',
-    noComments:'No comments yet', overdue:'Overdue',
-    moveTitle:'Move task', moveTo:'Move to:',
-    archiveNote:'Closed tasks go to archive',
-    notifOn:'Notifications on', notifOff:'Enable notifications', notifBlocked:'Notifications blocked',
-    descLabel:'Description', assignedTo:'Assigned to',
-    notifications:'Notifications', markAllRead:'Mark all as read', noNotifs:'No new notifications',
-  }
-}
-
-function urlBase64ToUint8Array(b) {
-  const p = '='.repeat((4 - b.length % 4) % 4)
-  const s = (b + p).replace(/-/g,'+').replace(/_/g,'/')
-  const r = window.atob(s)
-  const o = new Uint8Array(r.length)
-  for (let i=0;i<r.length;++i) o[i]=r.charCodeAt(i)
-  return o
 }
 
 const S = {
@@ -96,18 +70,18 @@ const S = {
   sidebarSection: { padding:'10px 12px', borderBottom:'1px solid #e8e8e6' },
   sidebarLabel: { fontSize:'10px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'6px', fontWeight:'500' },
   sidebarBottom: { padding:'14px 16px', borderTop:'1px solid #e8e8e6' },
-  navBtn: (active) => ({ display:'flex', alignItems:'center', width:'100%', textAlign:'left', padding:'7px 9px', borderRadius:'7px', fontSize:'13px', cursor:'pointer', border:'none', background:active?'#f4f4f3':'transparent', color:active?'#111':'#6b7280', fontWeight:active?'500':'400', marginBottom:'2px', transition:'all 0.1s' }),
-  wsBtn: (active) => ({ display:'block', width:'100%', textAlign:'left', padding:'6px 9px', borderRadius:'7px', fontSize:'13px', cursor:'pointer', border:'none', background:active?'#111':'transparent', color:active?'#fff':'#6b7280', fontWeight:active?'500':'400', marginBottom:'3px', transition:'all 0.12s' }),
+  navBtn: (active) => ({ display:'flex', alignItems:'center', width:'100%', textAlign:'left', padding:'7px 9px', borderRadius:'7px', fontSize:'13px', cursor:'pointer', border:'none', background:active?'#f4f4f3':'transparent', color:active?'#111':'#6b7280', fontWeight:active?'500':'400', marginBottom:'2px' }),
+  wsBtn: (active) => ({ display:'block', width:'100%', textAlign:'left', padding:'6px 9px', borderRadius:'7px', fontSize:'13px', cursor:'pointer', border:'none', background:active?'#111':'transparent', color:active?'#fff':'#6b7280', fontWeight:active?'500':'400', marginBottom:'3px' }),
   badge: (red, blue) => ({ marginLeft:'auto', fontSize:'11px', background: red?'#fef2f2':blue?'#eff6ff':'#f4f4f3', color: red?'#dc2626':blue?'#2563eb':'#9ca3af', padding:'1px 7px', borderRadius:'10px', fontWeight:'500' }),
   topbar: { background:'#fff', borderBottom:'1px solid #e8e8e6', padding:'0 24px', height:'56px', display:'flex', alignItems:'center', gap:'12px' },
   main: { flex:1, display:'flex', flexDirection:'column', overflow:'hidden', background:'#f5f5f3' },
-  liveBanner: { background:'#f0fdf4', borderBottom:'1px solid #bbf7d0', padding:'5px 24px', fontSize:'11px', color:'#166534', display:'flex', alignItems:'center', gap:'6px', letterSpacing:'0.01em' },
+  liveBanner: { background:'#f0fdf4', borderBottom:'1px solid #bbf7d0', padding:'5px 24px', fontSize:'11px', color:'#166534', display:'flex', alignItems:'center', gap:'6px' },
   statsGrid: { display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'10px', padding:'16px 24px 0' },
   statCard: { background:'#fff', borderRadius:'10px', padding:'16px 18px', border:'1px solid #e8e8e6' },
   tableWrap: { background:'#fff', borderRadius:'10px', border:'1px solid #e8e8e6', overflow:'hidden' },
   th: { fontSize:'10px', color:'#9ca3af', fontWeight:'500', textTransform:'uppercase', letterSpacing:'0.06em' },
-  searchInput: { padding:'9px 13px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', width:'220px', outline:'none', background:'#fafaf9', color:'#111', fontFamily:"'DM Sans', sans-serif", transition:'border-color 0.15s' },
-  btnPrimary: { background:'#111', color:'white', border:'none', borderRadius:'8px', padding:'9px 18px', fontSize:'13px', fontWeight:'500', cursor:'pointer', whiteSpace:'nowrap', fontFamily:"'DM Sans', sans-serif", letterSpacing:'-0.1px', transition:'opacity 0.15s' },
+  searchInput: { padding:'9px 13px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', width:'220px', outline:'none', background:'#fafaf9', color:'#111', fontFamily:"'DM Sans', sans-serif" },
+  btnPrimary: { background:'#111', color:'white', border:'none', borderRadius:'8px', padding:'9px 18px', fontSize:'13px', fontWeight:'500', cursor:'pointer', whiteSpace:'nowrap', fontFamily:"'DM Sans', sans-serif" },
   btnSm: (variant) => ({
     padding:'4px 9px', fontSize:'11px', borderRadius:'6px', cursor:'pointer', fontFamily:"'DM Sans', sans-serif", fontWeight:'500',
     ...(variant==='green' ? { border:'1px solid #bbf7d0', background:'#f0fdf4', color:'#16a34a' }
@@ -120,11 +94,10 @@ const S = {
   modalHeader: { padding:'20px 22px 16px', borderBottom:'1px solid #e8e8e6', display:'flex', alignItems:'center', justifyContent:'space-between' },
   modalBody: { padding:'20px 22px' },
   modalFooter: { padding:'16px 22px', borderTop:'1px solid #e8e8e6', display:'flex', justifyContent:'flex-end', gap:'8px' },
-  label: { display:'block', fontSize:'12px', fontWeight:'500', marginBottom:'5px', color:'#374151', letterSpacing:'0.01em' },
-  input: { width:'100%', padding:'9px 12px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', outline:'none', fontFamily:"'DM Sans', sans-serif", color:'#111', background:'#fff', transition:'border-color 0.15s' },
+  label: { display:'block', fontSize:'12px', fontWeight:'500', marginBottom:'5px', color:'#374151' },
+  input: { width:'100%', padding:'9px 12px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', outline:'none', fontFamily:"'DM Sans', sans-serif", color:'#111', background:'#fff' },
   select: { width:'100%', padding:'9px 12px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', outline:'none', fontFamily:"'DM Sans', sans-serif", color:'#111', background:'#fff' },
   grid2: { display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'12px' },
-  row: { display:'grid', padding:'12px 18px', borderBottom:'1px solid #f0f0ee', alignItems:'center', cursor:'pointer', transition:'background 0.1s' },
   pill: (status) => ({ display:'inline-flex', alignItems:'center', padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'500', background:STATUS_META[status]?.bg||'#f4f4f3', color:STATUS_META[status]?.color||'#374151' }),
   metaItem: { padding:'10px 13px', background:'#fafaf9', borderRadius:'8px', border:'1px solid #f0f0ee' },
   metaLabel: { fontSize:'10px', color:'#9ca3af', marginBottom:'5px', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:'500' },
@@ -134,38 +107,24 @@ function FormField({ label, children }) {
   return <div><label style={S.label}>{label}</label>{children}</div>
 }
 
-// Multi-select users component
-function UserMultiSelect({ users, selected, onChange, placeholder }) {
+function UserMultiSelect({ users, selected, onChange }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
-
   useEffect(() => {
-    function handleClick(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
-    }
+    function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
-
-  const toggle = (id) => {
-    if (selected.includes(id)) {
-      onChange(selected.filter(s => s !== id))
-    } else {
-      onChange([...selected, id])
-    }
-  }
-
+  const toggle = (id) => onChange(selected.includes(id) ? selected.filter(s => s !== id) : [...selected, id])
   const selectedUsers = users.filter(u => selected.includes(u.id))
-
   return (
     <div ref={ref} style={{ position:'relative' }}>
-      <div onClick={() => setOpen(v => !v)}
-        style={{ ...S.input, cursor:'pointer', display:'flex', alignItems:'center', flexWrap:'wrap', gap:'4px', minHeight:'40px', padding:'6px 12px' }}>
-        {selectedUsers.length === 0 && <span style={{ color:'#9ca3af', fontSize:'13px' }}>{placeholder || '— Wybierz osoby —'}</span>}
+      <div onClick={() => setOpen(v => !v)} style={{ ...S.input, cursor:'pointer', display:'flex', alignItems:'center', flexWrap:'wrap', gap:'4px', minHeight:'40px', padding:'6px 12px' }}>
+        {selectedUsers.length === 0 && <span style={{ color:'#9ca3af', fontSize:'13px' }}>— Wybierz osoby —</span>}
         {selectedUsers.map(u => (
           <span key={u.id} style={{ background:'#eff6ff', color:'#1d4ed8', fontSize:'11px', padding:'2px 8px', borderRadius:'20px', fontWeight:'500', display:'flex', alignItems:'center', gap:'4px' }}>
             {u.full_name}
-            <span onClick={e => { e.stopPropagation(); toggle(u.id) }} style={{ cursor:'pointer', fontSize:'14px', lineHeight:'1', color:'#93c5fd' }}>×</span>
+            <span onClick={e => { e.stopPropagation(); toggle(u.id) }} style={{ cursor:'pointer', fontSize:'14px', color:'#93c5fd' }}>×</span>
           </span>
         ))}
         <span style={{ marginLeft:'auto', color:'#9ca3af', fontSize:'12px' }}>▾</span>
@@ -174,14 +133,12 @@ function UserMultiSelect({ users, selected, onChange, placeholder }) {
         <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#fff', border:'1px solid #e8e8e6', borderRadius:'8px', zIndex:100, maxHeight:'180px', overflowY:'auto', boxShadow:'0 4px 12px rgba(0,0,0,0.1)', marginTop:'2px' }}>
           {users.map(u => (
             <div key={u.id} onClick={() => toggle(u.id)}
-              style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 12px', cursor:'pointer', background: selected.includes(u.id) ? '#eff6ff' : 'transparent' }}
-              onMouseEnter={e => { if (!selected.includes(u.id)) e.currentTarget.style.background = '#f4f4f3' }}
-              onMouseLeave={e => { if (!selected.includes(u.id)) e.currentTarget.style.background = 'transparent' }}>
-              <div style={{ width:'22px', height:'22px', borderRadius:'50%', background: selected.includes(u.id) ? '#dbeafe' : '#f0f0ee', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'9px', fontWeight:'600', color: selected.includes(u.id) ? '#1d4ed8' : '#6b7280' }}>
+              style={{ display:'flex', alignItems:'center', gap:'8px', padding:'9px 12px', cursor:'pointer', background: selected.includes(u.id)?'#eff6ff':'transparent' }}>
+              <div style={{ width:'22px', height:'22px', borderRadius:'50%', background: selected.includes(u.id)?'#dbeafe':'#f0f0ee', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'9px', fontWeight:'600', color: selected.includes(u.id)?'#1d4ed8':'#6b7280' }}>
                 {(u.full_name||'?').substring(0,2).toUpperCase()}
               </div>
               <span style={{ fontSize:'13px', color:'#111', flex:1 }}>{u.full_name}</span>
-              {selected.includes(u.id) && <span style={{ color:'#1d4ed8', fontSize:'14px' }}>✓</span>}
+              {selected.includes(u.id) && <span style={{ color:'#1d4ed8' }}>✓</span>}
             </div>
           ))}
         </div>
@@ -190,28 +147,16 @@ function UserMultiSelect({ users, selected, onChange, placeholder }) {
   )
 }
 
-// Notification bell component
 function NotificationBell({ notifications, onMarkRead, onMarkAllRead, onClickNotif }) {
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
   const unread = notifications.filter(n => !n.read).length
-
   useEffect(() => {
-    function handleClick(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
-    }
+    function handleClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
-
-  const notifIcon = {
-    task_assigned: '👤',
-    comment_added: '💬',
-    file_added: '📎',
-    status_changed: '🔄',
-    message: '📨',
-  }
-
+  const notifIcon = { task_assigned:'👤', comment_added:'💬', file_added:'📎', status_changed:'🔄', message:'📨' }
   const fmtTime = (d) => {
     const diff = Date.now() - new Date(d).getTime()
     const mins = Math.floor(diff / 60000)
@@ -221,17 +166,11 @@ function NotificationBell({ notifications, onMarkRead, onMarkAllRead, onClickNot
     if (hrs < 24) return `${hrs}h temu`
     return new Date(d).toLocaleDateString('pl-PL')
   }
-
   return (
     <div ref={ref} style={{ position:'relative' }}>
-      <button onClick={() => setOpen(v => !v)}
-        style={{ position:'relative', width:'38px', height:'38px', background: open ? '#f4f4f3' : '#fff', border:'1px solid #e8e8e6', borderRadius:'8px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'17px' }}>
+      <button onClick={() => setOpen(v => !v)} style={{ position:'relative', width:'38px', height:'38px', background: open?'#f4f4f3':'#fff', border:'1px solid #e8e8e6', borderRadius:'8px', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'17px' }}>
         🔔
-        {unread > 0 && (
-          <span style={{ position:'absolute', top:'-5px', right:'-5px', width:'18px', height:'18px', background:'#dc2626', color:'white', borderRadius:'50%', fontSize:'10px', fontWeight:'700', display:'flex', alignItems:'center', justifyContent:'center' }}>
-            {unread > 9 ? '9+' : unread}
-          </span>
-        )}
+        {unread > 0 && <span style={{ position:'absolute', top:'-5px', right:'-5px', width:'18px', height:'18px', background:'#dc2626', color:'white', borderRadius:'50%', fontSize:'10px', fontWeight:'700', display:'flex', alignItems:'center', justifyContent:'center' }}>{unread > 9 ? '9+' : unread}</span>}
       </button>
       {open && (
         <div style={{ position:'absolute', top:'calc(100% + 6px)', right:0, width:'360px', background:'#fff', border:'1px solid #e8e8e6', borderRadius:'12px', boxShadow:'0 8px 24px rgba(0,0,0,0.12)', zIndex:200 }}>
@@ -240,17 +179,13 @@ function NotificationBell({ notifications, onMarkRead, onMarkAllRead, onClickNot
             {unread > 0 && <button onClick={onMarkAllRead} style={{ fontSize:'11px', color:'#2563eb', border:'none', background:'none', cursor:'pointer', fontFamily:"'DM Sans',sans-serif" }}>Oznacz wszystkie</button>}
           </div>
           <div style={{ maxHeight:'380px', overflowY:'auto' }}>
-            {notifications.length === 0 && (
-              <div style={{ padding:'32px', textAlign:'center', color:'#9ca3af', fontSize:'13px' }}>Brak powiadomien 🎉</div>
-            )}
+            {notifications.length === 0 && <div style={{ padding:'32px', textAlign:'center', color:'#9ca3af', fontSize:'13px' }}>Brak powiadomien 🎉</div>}
             {notifications.slice(0, 20).map(n => (
               <div key={n.id} onClick={() => { onMarkRead(n.id); onClickNotif(n); setOpen(false) }}
-                style={{ display:'flex', gap:'10px', padding:'12px 16px', borderBottom:'1px solid #f0f0ee', cursor:'pointer', background: n.read ? '#fff' : '#fafbff' }}
-                onMouseEnter={e => e.currentTarget.style.background = '#f4f4f3'}
-                onMouseLeave={e => e.currentTarget.style.background = n.read ? '#fff' : '#fafbff'}>
-                <div style={{ fontSize:'18px', flexShrink:0, marginTop:'1px' }}>{notifIcon[n.type] || '🔔'}</div>
+                style={{ display:'flex', gap:'10px', padding:'12px 16px', borderBottom:'1px solid #f0f0ee', cursor:'pointer', background: n.read?'#fff':'#fafbff' }}>
+                <div style={{ fontSize:'18px', flexShrink:0 }}>{notifIcon[n.type] || '🔔'}</div>
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:'12px', fontWeight: n.read ? '400' : '600', color:'#111', marginBottom:'2px' }}>{n.title}</div>
+                  <div style={{ fontSize:'12px', fontWeight: n.read?'400':'600', color:'#111', marginBottom:'2px' }}>{n.title}</div>
                   {n.body && <div style={{ fontSize:'11px', color:'#6b7280', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{n.body}</div>}
                   <div style={{ fontSize:'10px', color:'#9ca3af', marginTop:'3px' }}>{fmtTime(n.created_at)}</div>
                 </div>
@@ -264,11 +199,142 @@ function NotificationBell({ notifications, onMarkRead, onMarkAllRead, onClickNot
   )
 }
 
+// SUGGESTIONS PANEL
+function SuggestionsPanel({ user, profile, users }) {
+  const [suggestions, setSuggestions] = useState([])
+  const [newText, setNewText] = useState('')
+  const [category, setCategory] = useState('general')
+  const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => { loadSuggestions() }, [])
+
+  async function loadSuggestions() {
+    setLoading(true)
+    const { data } = await supabase.from('suggestions')
+      .select('*, author:profiles!author_id(full_name)')
+      .order('created_at', { ascending: false })
+    setSuggestions(data || [])
+    setLoading(false)
+  }
+
+  async function addSuggestion() {
+    if (!newText.trim() || !user) return
+    setSaving(true)
+    await supabase.from('suggestions').insert({ content: newText.trim(), category, author_id: user.id })
+    setNewText('')
+    setCategory('general')
+    await loadSuggestions()
+    setSaving(false)
+  }
+
+  async function deleteSuggestion(id) {
+    if (!confirm('Usunac te sugestie?')) return
+    await supabase.from('suggestions').delete().eq('id', id)
+    await loadSuggestions()
+  }
+
+  const fmtDT = (d) => d ? new Date(d).toLocaleString('pl-PL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''
+  const initials = (n) => (n||'?').split(' ').map(x=>x[0]).join('').toUpperCase().substring(0,2)
+  const catMeta = (key) => SUGGESTION_CATEGORIES.find(c => c.key === key) || SUGGESTION_CATEGORIES[0]
+
+  return (
+    <div style={{ flex:1, overflow:'auto', padding:'20px 24px' }}>
+      {/* Header */}
+      <div style={{ background:'#fff', borderRadius:'12px', border:'1px solid #e8e8e6', padding:'20px 24px', marginBottom:'16px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }}>
+          <span style={{ fontSize:'20px' }}>💡</span>
+          <div>
+            <div style={{ fontSize:'15px', fontWeight:'600', color:'#111' }}>Sugestie i usprawnienia</div>
+            <div style={{ fontSize:'12px', color:'#9ca3af' }}>Podziel się pomysłem na ulepszenie systemu — każdy może dodać i zobaczyć sugestie</div>
+          </div>
+        </div>
+
+        {/* Add form */}
+        <div style={{ marginTop:'16px', display:'flex', gap:'8px', alignItems:'flex-start' }}>
+          <div style={{ flex:1 }}>
+            <textarea
+              value={newText}
+              onChange={e => setNewText(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && e.ctrlKey && addSuggestion()}
+              placeholder="Opisz co chcesz ulepszyć, zmienić lub dodać... (Ctrl+Enter żeby wysłać)"
+              style={{ ...S.input, height:'72px', resize:'vertical', marginBottom:'8px' }}
+            />
+            <div style={{ display:'flex', gap:'6px', flexWrap:'wrap' }}>
+              {SUGGESTION_CATEGORIES.map(cat => (
+                <button key={cat.key} onClick={() => setCategory(cat.key)}
+                  style={{ padding:'4px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:'500', cursor:'pointer', border:'1px solid', borderColor: category===cat.key?cat.color:'#e8e8e6', background: category===cat.key?cat.bg:'#fff', color: category===cat.key?cat.color:'#6b7280', fontFamily:"'DM Sans',sans-serif" }}>
+                  {cat.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <button onClick={addSuggestion} disabled={saving || !newText.trim()}
+            style={{ ...S.btnPrimary, opacity: saving||!newText.trim()?0.5:1, marginTop:'2px', flexShrink:0 }}>
+            {saving ? 'Dodaje...' : '+ Dodaj'}
+          </button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'8px', marginBottom:'16px' }}>
+        {[{ label:'Wszystkie', val:suggestions.length, color:'#111' }, ...SUGGESTION_CATEGORIES.map(c => ({
+          label: c.label, val: suggestions.filter(s => s.category === c.key).length, color: c.color
+        }))].map(s => (
+          <div key={s.label} style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'8px', padding:'10px 14px' }}>
+            <div style={{ fontSize:'9px', color:'#9ca3af', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'4px' }}>{s.label}</div>
+            <div style={{ fontSize:'20px', fontWeight:'600', color:s.color }}>{s.val}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* List */}
+      <div style={{ background:'#fff', borderRadius:'12px', border:'1px solid #e8e8e6', overflow:'hidden' }}>
+        {loading && <div style={{ padding:'40px', textAlign:'center', color:'#9ca3af' }}>Ladowanie...</div>}
+        {!loading && suggestions.length === 0 && (
+          <div style={{ padding:'48px', textAlign:'center', color:'#9ca3af', fontSize:'13px' }}>
+            <div style={{ fontSize:'32px', marginBottom:'10px' }}>💡</div>
+            Brak sugestii — bądź pierwszy!
+          </div>
+        )}
+        {suggestions.map((s, i) => {
+          const cat = catMeta(s.category)
+          const isOwn = s.author_id === user?.id
+          const isAdmin = user?.id === ADMIN_ID
+          return (
+            <div key={s.id} style={{ padding:'16px 20px', borderBottom:'1px solid #f0f0ee', background: i%2===0?'#fff':'#f9f9f8' }}>
+              <div style={{ display:'flex', alignItems:'flex-start', gap:'12px' }}>
+                {/* Avatar */}
+                <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:'#eff6ff', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'11px', fontWeight:'600', color:'#1d4ed8', flexShrink:0 }}>
+                  {initials(s.author?.full_name)}
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'6px', flexWrap:'wrap' }}>
+                    <span style={{ fontSize:'12px', fontWeight:'600', color:'#111' }}>{s.author?.full_name || 'Nieznany'}</span>
+                    <span style={{ fontSize:'11px', color:'#9ca3af' }}>{fmtDT(s.created_at)}</span>
+                    <span style={{ fontSize:'10px', fontWeight:'500', padding:'2px 8px', borderRadius:'20px', background:cat.bg, color:cat.color }}>
+                      {cat.label}
+                    </span>
+                  </div>
+                  <div style={{ fontSize:'13px', color:'#374151', lineHeight:'1.6', whiteSpace:'pre-wrap' }}>{s.content}</div>
+                </div>
+                {(isOwn || isAdmin) && (
+                  <button onClick={() => deleteSuggestion(s.id)} style={{ ...S.btnSm('red'), flexShrink:0, opacity:0.6 }}>Usun</button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard() {
   const router = useRouter()
-  const [lang, setLang] = useState('pl')
+  const [lang] = useState('pl')
   const t = T[lang]
-  const statusLabel = (s) => lang==='en' ? STATUS_META[s]?.labelEn : STATUS_META[s]?.label
+  const statusLabel = (s) => STATUS_META[s]?.label
 
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -277,6 +343,7 @@ export default function Dashboard() {
   const [workspace, setWorkspace] = useState('jamo_healthy')
   const [filter, setFilter] = useState('all')
   const [showArchive, setShowArchive] = useState(false)
+  const [showSuggestions, setShowSuggestions] = useState(false)
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [showDetail, setShowDetail] = useState(false)
@@ -292,8 +359,6 @@ export default function Dashboard() {
   const [sendingCmt, setSendingCmt] = useState(false)
   const [editingTask, setEditingTask] = useState(null)
   const [moveTarget, setMoveTarget] = useState('')
-  const [notifStatus, setNotifStatus] = useState('default')
-  const [showTimeoutWarning, setShowTimeoutWarning] = useState(false)
   const [showChat, setShowChat] = useState(false)
   const [chatUsers, setChatUsers] = useState([])
   const [chatSelected, setChatSelected] = useState(null)
@@ -319,7 +384,6 @@ export default function Dashboard() {
   const [crmClients, setCrmClients] = useState([])
 
   useEffect(() => {
-    const saved = localStorage.getItem('tf_lang'); if (saved) setLang(saved)
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) { router.push('/'); return }
       setUser(user)
@@ -327,25 +391,16 @@ export default function Dashboard() {
     })
     supabase.from('profiles').select('id, full_name').then(({ data }) => setUsers(data || []))
     supabase.from('clients').select('id, company_name, contact_name, segment').order('company_name').then(({ data }) => setCrmClients(data || []))
-    const warnTimer = setTimeout(() => setShowTimeoutWarning(true), 7.5 * 60 * 60 * 1000)
-    const logoutTimer = setTimeout(async () => { await supabase.auth.signOut(); router.push('/?timeout=1') }, 8 * 60 * 60 * 1000)
-    return () => { clearTimeout(warnTimer); clearTimeout(logoutTimer) }
   }, [])
 
-  // Load notifications
   const loadNotifications = useCallback(async () => {
     if (!user) return
-    const { data } = await supabase.from('notifications')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(50)
+    const { data } = await supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(50)
     setNotifications(data || [])
   }, [user])
 
   useEffect(() => { loadNotifications() }, [loadNotifications])
 
-  // Realtime notifications
   useEffect(() => {
     if (!user) return
     const ch = supabase.channel('notifs-rt')
@@ -367,43 +422,19 @@ export default function Dashboard() {
 
   async function handleClickNotif(notif) {
     if (notif.task_id) {
-      // Find task and open it
-      const task = tasks.find(t => t.id === notif.task_id)
-      if (task) {
-        setHighlightedTaskId(notif.task_id)
-        await openPreview(task)
-        setTimeout(() => setHighlightedTaskId(null), 3000)
-      } else {
-        // Task might be in different workspace - just highlight
-        setHighlightedTaskId(notif.task_id)
-        setTimeout(() => setHighlightedTaskId(null), 3000)
-      }
-    } else if (notif.type === 'message') {
-      setShowChat(true)
-    }
+      const task = tasks.find(t2 => t2.id === notif.task_id)
+      if (task) { setHighlightedTaskId(notif.task_id); await openPreview(task); setTimeout(() => setHighlightedTaskId(null), 3000) }
+    } else if (notif.type === 'message') { setShowChat(true) }
   }
 
   async function createNotification(userIds, type, title, body, taskId = null, messageId = null) {
     if (!userIds || userIds.length === 0) return
-    const records = userIds.map(uid => ({
-      user_id: uid,
-      type,
-      title,
-      body,
-      task_id: taskId || null,
-      message_id: messageId || null,
-      read: false,
-    }))
+    const records = userIds.map(uid => ({ user_id:uid, type, title, body, task_id:taskId||null, message_id:messageId||null, read:false }))
     await supabase.from('notifications').insert(records)
   }
 
-  function toggleLang() { const n=lang==='pl'?'en':'pl'; setLang(n); localStorage.setItem('tf_lang',n) }
-
   const loadTasks = useCallback(async () => {
-    const { data } = await supabase.from('tasks')
-      .select('*, assigned_profile:profiles!assigned_to(full_name)')
-      .eq('area', workspace)
-      .order('created_at', { ascending: false })
+    const { data } = await supabase.from('tasks').select('*, assigned_profile:profiles!assigned_to(full_name)').eq('area', workspace).order('created_at', { ascending: false })
     setTasks(data || [])
   }, [workspace])
 
@@ -415,10 +446,7 @@ export default function Dashboard() {
 
   async function loadFiles(id) { const { data } = await supabase.storage.from('task-files').list(id); setTaskFiles(data||[]) }
   async function loadComments(id) {
-    const { data } = await supabase.from('comments')
-      .select('*, author:profiles!author_id(full_name)')
-      .eq('task_id', id)
-      .order('created_at', { ascending: true })
+    const { data } = await supabase.from('comments').select('*, author:profiles!author_id(full_name)').eq('task_id', id).order('created_at', { ascending: true })
     setComments(data||[])
   }
 
@@ -427,20 +455,8 @@ export default function Dashboard() {
     setUploading(true)
     await supabase.storage.from('task-files').upload(`${selectedTask.id}/${Date.now()}_${file.name}`, file)
     await loadFiles(selectedTask.id)
-
-    // Notify all assigned users
-    const assignedUsers = selectedTask.assigned_users || []
-    if (selectedTask.assigned_to) assignedUsers.push(selectedTask.assigned_to)
-    const toNotify = [...new Set(assignedUsers)].filter(uid => uid !== user.id)
-    if (toNotify.length > 0) {
-      await createNotification(
-        toNotify,
-        'file_added',
-        `📎 ${profile?.full_name} dodal plik`,
-        `${file.name} → ${selectedTask.product_name}`,
-        selectedTask.id
-      )
-    }
+    const assignedUsers = [...new Set([...(selectedTask.assigned_users||[]), ...(selectedTask.assigned_to?[selectedTask.assigned_to]:[])])].filter(uid => uid !== user.id)
+    if (assignedUsers.length > 0) await createNotification(assignedUsers, 'file_added', `📎 ${profile?.full_name} dodal plik`, `${file.name} → ${selectedTask.product_name}`, selectedTask.id)
     setUploading(false)
   }
 
@@ -458,55 +474,22 @@ export default function Dashboard() {
     if (!newComment.trim()||!selectedTask||!user) return
     setSendingCmt(true)
     await supabase.from('comments').insert({ task_id:selectedTask.id, author_id:user.id, content:newComment.trim() })
-
-    // Notify all assigned users
-    const assignedUsers = [...(selectedTask.assigned_users || [])]
-    if (selectedTask.assigned_to) assignedUsers.push(selectedTask.assigned_to)
-    const toNotify = [...new Set(assignedUsers)].filter(uid => uid !== user.id)
-    if (toNotify.length > 0) {
-      await createNotification(
-        toNotify,
-        'comment_added',
-        `💬 ${profile?.full_name} dodal komentarz`,
-        `"${newComment.trim().substring(0, 60)}${newComment.length > 60 ? '...' : ''}" → ${selectedTask.product_name}`,
-        selectedTask.id
-      )
-    }
-
-    setNewComment('')
-    await loadComments(selectedTask.id)
-    setSendingCmt(false)
+    const toNotify = [...new Set([...(selectedTask.assigned_users||[]), ...(selectedTask.assigned_to?[selectedTask.assigned_to]:[])])].filter(uid => uid !== user.id)
+    if (toNotify.length > 0) await createNotification(toNotify, 'comment_added', `💬 ${profile?.full_name} dodal komentarz`, `"${newComment.trim().substring(0,60)}" → ${selectedTask.product_name}`, selectedTask.id)
+    setNewComment(''); await loadComments(selectedTask.id); setSendingCmt(false)
   }
 
   async function logout() { await supabase.auth.signOut(); router.push('/') }
 
   function openNew() {
     setEditingTask(null)
-    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null
-    const clientId = params?.get('client_id') || ''
-    const clientName = params?.get('client_name') || ''
-    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:clientName, marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'', assigned_users:[], deadline:'', client_id:clientId })
+    setForm({ order_number:'', claim_number:'', product_name:'', sku:'', client_name:'', marketplace:'Amazon UK', category:'Reklamacja', description:'', status:'open', priority:'med', assigned_to:'', assigned_users:[], deadline:'', client_id:'' })
     setShowModal(true)
   }
 
   function openEdit(task) {
     setEditingTask(task)
-    setForm({
-      order_number:task.order_number||'',
-      claim_number:task.claim_number||'',
-      product_name:task.product_name||'',
-      sku:task.sku||'',
-      client_name:task.client_name||'',
-      marketplace:task.marketplace||'Amazon UK',
-      category:task.category||'Reklamacja',
-      description:task.description||'',
-      status:task.status||'open',
-      priority:task.priority||'med',
-      assigned_to:task.assigned_to||'',
-      assigned_users:task.assigned_users||[],
-      deadline:task.deadline?task.deadline.split('T')[0]:'',
-      client_id:task.client_id||''
-    })
+    setForm({ order_number:task.order_number||'', claim_number:task.claim_number||'', product_name:task.product_name||'', sku:task.sku||'', client_name:task.client_name||'', marketplace:task.marketplace||'Amazon UK', category:task.category||'Reklamacja', description:task.description||'', status:task.status||'open', priority:task.priority||'med', assigned_to:task.assigned_to||'', assigned_users:task.assigned_users||[], deadline:task.deadline?task.deadline.split('T')[0]:'', client_id:task.client_id||'' })
     setShowModal(true)
   }
 
@@ -528,85 +511,23 @@ export default function Dashboard() {
   async function handleSave() {
     if (!form.product_name) return
     setSaving(true)
-
-    // Merge assigned_to into assigned_users
-    const allAssigned = [...new Set([
-      ...(form.assigned_users || []),
-      ...(form.assigned_to ? [form.assigned_to] : [])
-    ])]
-
-    const payload = {
-      ...form,
-      assigned_to: form.assigned_to || (allAssigned[0] || null),
-      assigned_users: allAssigned,
-      deadline: form.deadline || null,
-      client_id: form.client_id || null
-    }
+    const allAssigned = [...new Set([...(form.assigned_users||[]), ...(form.assigned_to?[form.assigned_to]:[])])]
+    const payload = { ...form, assigned_to:form.assigned_to||(allAssigned[0]||null), assigned_users:allAssigned, deadline:form.deadline||null, client_id:form.client_id||null }
 
     if (editingTask) {
       await supabase.from('tasks').update(payload).eq('id', editingTask.id)
-
-      // Notify newly assigned users
-      const prevAssigned = editingTask.assigned_users || []
-      if (editingTask.assigned_to) prevAssigned.push(editingTask.assigned_to)
+      const prevAssigned = [...new Set([...(editingTask.assigned_users||[]), ...(editingTask.assigned_to?[editingTask.assigned_to]:[])])]
       const newlyAssigned = allAssigned.filter(uid => !prevAssigned.includes(uid) && uid !== user.id)
-
-      if (newlyAssigned.length > 0) {
-        await createNotification(
-          newlyAssigned,
-          'task_assigned',
-          `👤 ${profile?.full_name} przypisal Ci zadanie`,
-          form.product_name,
-          editingTask.id
-        )
-      }
-
-      // Notify about status change
+      if (newlyAssigned.length > 0) await createNotification(newlyAssigned, 'task_assigned', `👤 ${profile?.full_name} przypisal Ci zadanie`, form.product_name, editingTask.id)
       if (form.status !== editingTask.status) {
         const toNotify = allAssigned.filter(uid => uid !== user.id)
-        if (toNotify.length > 0) {
-          await createNotification(
-            toNotify,
-            'status_changed',
-            `🔄 Status zmieniony: ${statusLabel(form.status)}`,
-            form.product_name,
-            editingTask.id
-          )
-        }
-        // Also send chat message
-        if (editingTask.assigned_to && editingTask.assigned_to !== user.id) {
-          await supabase.from('messages').insert({
-            sender_id: user.id,
-            receiver_id: editingTask.assigned_to,
-            content: `Status zadania zmieniony na: ${statusLabel(form.status)} — ${form.product_name}`,
-            task_id: editingTask.id,
-            task_ref: `#${editingTask.order_number||editingTask.id.substring(0,6).toUpperCase()} · ${form.product_name}`,
-          })
-        }
+        if (toNotify.length > 0) await createNotification(toNotify, 'status_changed', `🔄 Status zmieniony: ${statusLabel(form.status)}`, form.product_name, editingTask.id)
       }
     } else {
       const { data: newTask } = await supabase.from('tasks').insert({ ...payload, area:workspace, created_by:user.id }).select().single()
       if (newTask && allAssigned.length > 0) {
         const toNotify = allAssigned.filter(uid => uid !== user.id)
-        if (toNotify.length > 0) {
-          await createNotification(
-            toNotify,
-            'task_assigned',
-            `👤 ${profile?.full_name} przypisal Ci nowe zadanie`,
-            form.product_name,
-            newTask.id
-          )
-          // Also send chat message to primary assignee
-          if (form.assigned_to && form.assigned_to !== user.id) {
-            await supabase.from('messages').insert({
-              sender_id: user.id,
-              receiver_id: form.assigned_to,
-              content: `Przypisano Ci nowe zadanie: ${form.product_name}`,
-              task_id: newTask.id,
-              task_ref: `#${newTask.order_number||newTask.id.substring(0,6).toUpperCase()} · ${form.product_name}`,
-            })
-          }
-        }
+        if (toNotify.length > 0) await createNotification(toNotify, 'task_assigned', `👤 ${profile?.full_name} przypisal Ci nowe zadanie`, form.product_name, newTask.id)
       }
     }
     setSaving(false); setShowModal(false); setEditingTask(null); loadTasks()
@@ -616,20 +537,8 @@ export default function Dashboard() {
 
   async function changeStatus(id, status, task) {
     await supabase.from('tasks').update({ status }).eq('id', id)
-
-    // Notify assigned users
-    const assignedUsers = [...(task.assigned_users || [])]
-    if (task.assigned_to) assignedUsers.push(task.assigned_to)
-    const toNotify = [...new Set(assignedUsers)].filter(uid => uid !== user.id)
-    if (toNotify.length > 0) {
-      await createNotification(
-        toNotify,
-        'status_changed',
-        `🔄 ${profile?.full_name} zmienil status`,
-        `${statusLabel(status)} → ${task.product_name}`,
-        id
-      )
-    }
+    const toNotify = [...new Set([...(task.assigned_users||[]), ...(task.assigned_to?[task.assigned_to]:[])])].filter(uid => uid !== user.id)
+    if (toNotify.length > 0) await createNotification(toNotify, 'status_changed', `🔄 ${profile?.full_name} zmienil status`, `${statusLabel(status)} → ${task.product_name}`, id)
     loadTasks()
   }
 
@@ -663,14 +572,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return
     const ch = supabase.channel('chat-rt')
-      .on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'}, async (payload) => {
-        loadChatMsgs()
-        loadChatUnread()
-        // Create notification for new message
-        if (payload.new.receiver_id === user.id) {
-          loadNotifications()
-        }
-      })
+      .on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'}, () => { loadChatMsgs(); loadChatUnread() })
       .subscribe()
     return () => supabase.removeChannel(ch)
   }, [user, chatSelected, loadChatMsgs])
@@ -680,22 +582,8 @@ export default function Dashboard() {
   async function sendChatMsg() {
     if (!chatText.trim()||!chatSelected||!user) return
     setChatSending(true)
-    const msg = await supabase.from('messages').insert({
-      sender_id:user.id, receiver_id:chatSelected.id, content:chatText.trim(),
-      task_id:chatTaskObj?.id||null,
-      task_ref:chatTaskObj?`#${chatTaskObj.order_number||chatTaskObj.id.substring(0,6).toUpperCase()} · ${chatTaskObj.product_name}`:null,
-    }).select().single()
-
-    // Create notification
-    await createNotification(
-      [chatSelected.id],
-      'message',
-      `📨 ${profile?.full_name}`,
-      chatText.trim().substring(0, 80),
-      chatTaskObj?.id || null,
-      msg.data?.id || null
-    )
-
+    await supabase.from('messages').insert({ sender_id:user.id, receiver_id:chatSelected.id, content:chatText.trim(), task_id:chatTaskObj?.id||null, task_ref:chatTaskObj?`#${chatTaskObj.order_number||chatTaskObj.id.substring(0,6).toUpperCase()} · ${chatTaskObj.product_name}`:null })
+    await createNotification([chatSelected.id], 'message', `📨 ${profile?.full_name}`, chatText.trim().substring(0,80), chatTaskObj?.id||null)
     await fetch('/api/send-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:chatSelected.id,title:`💬 ${profile?.full_name}`,body:chatText.trim(),url:'/dashboard'})})
     setChatText(''); setChatTaskObj(null); setChatTaskRef(''); setChatSending(false)
     chatInputRef.current?.focus()
@@ -707,10 +595,8 @@ export default function Dashboard() {
     const {error} = await supabase.storage.from('task-files').upload(path, file)
     if (!error) {
       const {data:u} = await supabase.storage.from('task-files').createSignedUrl(path, 86400*30)
-      await supabase.from('messages').insert({sender_id:user.id,receiver_id:chatSelected.id,file_url:u?.signedUrl,file_name:file.name,file_size:file.size,task_id:chatTaskObj?.id||null,task_ref:chatTaskObj?`#${chatTaskObj.order_number} · ${chatTaskObj.product_name}`:null})
-      if (chatTaskObj?.id) await supabase.storage.from('task-files').copy(path,`${chatTaskObj.id}/${Date.now()}_${file.name}`)
-      await createNotification([chatSelected.id], 'message', `📎 ${profile?.full_name} wyslal plik`, file.name, chatTaskObj?.id || null)
-      await fetch('/api/send-push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:chatSelected.id,title:`📎 ${profile?.full_name}`,body:file.name,url:'/dashboard'})})
+      await supabase.from('messages').insert({sender_id:user.id,receiver_id:chatSelected.id,file_url:u?.signedUrl,file_name:file.name,file_size:file.size,task_id:chatTaskObj?.id||null})
+      await createNotification([chatSelected.id], 'message', `📎 ${profile?.full_name} wyslal plik`, file.name, chatTaskObj?.id||null)
       setChatTaskObj(null); setChatTaskRef('')
     }
     e.target.value=''
@@ -728,67 +614,54 @@ export default function Dashboard() {
     return true
   })
 
-  const counts = {
-    all:active.length,
-    open:active.filter(t2=>['open','inprogress','waiting'].includes(t2.status)).length,
-    urgent:active.filter(t2=>t2.status==='urgent').length,
-    mine:active.filter(t2=>t2.assigned_to===user?.id||(t2.assigned_users||[]).includes(user?.id)).length,
-    archive:archived.length
-  }
-
+  const counts = { all:active.length, open:active.filter(t2=>['open','inprogress','waiting'].includes(t2.status)).length, urgent:active.filter(t2=>t2.status==='urgent').length, mine:active.filter(t2=>t2.assigned_to===user?.id||(t2.assigned_users||[]).includes(user?.id)).length, archive:archived.length }
   const availWS = WORKSPACES.filter(w=>w.key!==workspace&&(profile?.role==='admin'||(profile?.areas||[]).includes(w.key)))
   const cols = '100px 1fr 100px 120px 120px 70px 80px 140px'
-  const fmtDate = (d) => d?new Date(d).toLocaleDateString(lang==='pl'?'pl-PL':'en-GB'):''
-  const fmtDT = (d) => d?new Date(d).toLocaleString(lang==='pl'?'pl-PL':'en-GB',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):''
+  const fmtDate = (d) => d?new Date(d).toLocaleDateString('pl-PL'):''
+  const fmtDT = (d) => d?new Date(d).toLocaleString('pl-PL',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):''
   const fileIcon = (n) => n.match(/\.(jpg|jpeg|png|gif|webp)$/i)?'IMG':n.match(/\.pdf$/i)?'PDF':n.match(/\.docx?$/i)?'DOC':n.match(/\.xlsx?$/i)?'XLS':'FILE'
   const initials = (name) => (name||'?').substring(0,2).toUpperCase()
-
-  const totalUnread = Object.values(chatUnread).reduce((a,b)=>a+b,0) + notifications.filter(n=>!n.read).length
+  const totalUnread = Object.values(chatUnread).reduce((a,b)=>a+b,0)
 
   const TaskRow = ({ task, isArchived=false, index=0 }) => {
-    const baseBg = highlightedTaskId === task.id ? '#fffbeb' : (index % 2 === 0 ? '#ffffff' : '#f7f7f5')
-    const assignedUsersList = [...new Set([
-      ...(task.assigned_users || []),
-      ...(task.assigned_to ? [task.assigned_to] : [])
-    ])]
+    const baseBg = highlightedTaskId===task.id ? '#fffbeb' : (index%2===0?'#ffffff':'#f7f7f5')
+    const assignedUsersList = [...new Set([...(task.assigned_users||[]), ...(task.assigned_to?[task.assigned_to]:[])])]
     const assignedProfiles = users.filter(u => assignedUsersList.includes(u.id))
-
     return (
       <div onClick={()=>openPreview(task)}
-        style={{...S.row, gridTemplateColumns:cols, opacity:isArchived?0.65:1, background:baseBg, transition:'background 0.5s'}}
-        onMouseEnter={e=>{ if(highlightedTaskId !== task.id) e.currentTarget.style.background='#eef2ff' }}
+        style={{...S.row, gridTemplateColumns:cols, opacity:isArchived?0.65:1, background:baseBg, transition:'background 0.5s', display:'grid', padding:'12px 18px', borderBottom:'1px solid #f0f0ee', alignItems:'center', cursor:'pointer'}}
+        onMouseEnter={e=>{ if(highlightedTaskId!==task.id) e.currentTarget.style.background='#eef2ff' }}
         onMouseLeave={e=>{ e.currentTarget.style.background=baseBg }}>
         <div>
-          <div style={{fontSize:'12px', fontWeight:'500', color:'#2563eb', fontFamily:"'DM Mono', monospace", letterSpacing:'-0.3px'}}>{task.order_number||'—'}</div>
-          <div style={{fontSize:'10px', color:'#9ca3af', marginTop:'1px'}}>{task.claim_number||''}</div>
+          <div style={{fontSize:'12px', fontWeight:'500', color:'#2563eb', fontFamily:"'DM Mono', monospace"}}>{task.order_number||'—'}</div>
+          <div style={{fontSize:'10px', color:'#9ca3af'}}>{task.claim_number||''}</div>
         </div>
         <div>
-          <div style={{fontSize:'13px', fontWeight:'500', color:'#111', letterSpacing:'-0.1px'}}>{task.product_name}</div>
-          <div style={{fontSize:'12px', color:'#9ca3af', marginTop:'2px'}}>{task.client_name}{task.category?' · '+task.category:''}</div>
+          <div style={{fontSize:'13px', fontWeight:'500', color:'#111'}}>{task.product_name}</div>
+          <div style={{fontSize:'12px', color:'#9ca3af'}}>{task.client_name}{task.category?' · '+task.category:''}</div>
         </div>
         <div style={{fontSize:'12px', color:'#6b7280'}}>{task.marketplace||'—'}</div>
         <div onClick={e=>e.stopPropagation()}>
           {isArchived
             ? <span style={S.pill('done')}>{statusLabel('done')}</span>
             : <select value={task.status} onChange={e=>{e.stopPropagation();changeStatus(task.id,e.target.value,task)}}
-                style={{...S.pill(task.status), border:'none', cursor:'pointer', outline:'none', appearance:'none', paddingRight:'6px', fontFamily:"'DM Sans', sans-serif"}}>
+                style={{...S.pill(task.status), border:'none', cursor:'pointer', outline:'none', appearance:'none', fontFamily:"'DM Sans', sans-serif"}}>
                 {Object.keys(STATUS_META).map(k=><option key={k} value={k}>{statusLabel(k)}</option>)}
               </select>
           }
         </div>
-        {/* Multiple assignees display */}
         <div style={{display:'flex', alignItems:'center', gap:'3px', flexWrap:'wrap'}}>
-          {assignedProfiles.length === 0 && <span style={{color:'#d1d5db', fontSize:'12px'}}>—</span>}
+          {assignedProfiles.length===0 && <span style={{color:'#d1d5db', fontSize:'12px'}}>—</span>}
           {assignedProfiles.slice(0,3).map(u => (
-            <div key={u.id} title={u.full_name} style={{width:'22px',height:'22px',borderRadius:'50%',background:'#eff6ff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'8px',fontWeight:'600',color:'#2563eb',flexShrink:0,border:'1px solid #bfdbfe'}}>
+            <div key={u.id} title={u.full_name} style={{width:'22px',height:'22px',borderRadius:'50%',background:'#eff6ff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'8px',fontWeight:'600',color:'#2563eb',border:'1px solid #bfdbfe'}}>
               {initials(u.full_name)}
             </div>
           ))}
           {assignedProfiles.length > 3 && <span style={{fontSize:'10px',color:'#9ca3af'}}>+{assignedProfiles.length-3}</span>}
         </div>
         <div style={{display:'flex', alignItems:'center', gap:'5px'}}>
-          <span style={{width:'7px',height:'7px',borderRadius:'50%',background:PRIO_DOT[task.priority],flexShrink:0,display:'inline-block'}}></span>
-          <span style={{fontSize:'11px',color:'#9ca3af'}}>{task.priority==='high'?t.high:task.priority==='med'?t.med:t.low}</span>
+          <span style={{width:'7px',height:'7px',borderRadius:'50%',background:PRIO_DOT[task.priority],display:'inline-block'}}></span>
+          <span style={{fontSize:'11px',color:'#9ca3af'}}>{task.priority==='high'?'Wysoki':task.priority==='med'?'Sredni':'Niski'}</span>
         </div>
         <div>
           {task.deadline
@@ -809,7 +682,6 @@ export default function Dashboard() {
 
   return (
     <div style={{display:'flex',height:'100vh',fontFamily:"'DM Sans', -apple-system, sans-serif",fontSize:'14px'}}>
-
       {/* SIDEBAR */}
       <div style={S.sidebar}>
         <div style={S.sidebarTop}>
@@ -819,18 +691,15 @@ export default function Dashboard() {
             </div>
             <div>
               <div style={{fontWeight:'600',fontSize:'14px',letterSpacing:'-0.3px',color:'#111'}}>TaskFlow</div>
-              <div style={{fontSize:'10px',color:'#9ca3af',marginTop:'1px'}}>{t.appSub}</div>
+              <div style={{fontSize:'10px',color:'#9ca3af'}}>{t.appSub}</div>
             </div>
           </div>
-          <button onClick={toggleLang} style={{fontSize:'16px',border:'1px solid #e8e8e6',borderRadius:'6px',padding:'3px 7px',cursor:'pointer',background:'#fafaf9',lineHeight:'1.3'}}>
-            {lang==='pl'?'🇵🇱':'🇬🇧'}
-          </button>
         </div>
 
         <div style={S.sidebarSection}>
           <div style={S.sidebarLabel}>{t.ws}</div>
           {WORKSPACES.filter(ws=>profile?.role==='admin'||(profile?.areas||[]).includes(ws.key)).map(ws=>(
-            <button key={ws.key} onClick={()=>{setWorkspace(ws.key);setFilter('all');setShowArchive(false)}} style={S.wsBtn(workspace===ws.key)}>
+            <button key={ws.key} onClick={()=>{setWorkspace(ws.key);setFilter('all');setShowArchive(false);setShowSuggestions(false)}} style={S.wsBtn(workspace===ws.key&&!showSuggestions)}>
               {ws.label}
             </button>
           ))}
@@ -843,25 +712,26 @@ export default function Dashboard() {
             {key:'open',label:t.open,count:counts.open},
             {key:'urgent',label:t.urgent,count:counts.urgent,red:true},
           ].map(item=>(
-            <button key={item.key} onClick={()=>{setFilter(item.key);setShowArchive(false)}} style={S.navBtn(filter===item.key&&!showArchive)}>
+            <button key={item.key} onClick={()=>{setFilter(item.key);setShowArchive(false);setShowSuggestions(false)}} style={S.navBtn(filter===item.key&&!showArchive&&!showSuggestions)}>
               {item.label}
               <span style={S.badge(item.red&&item.count>0, item.blue&&item.count>0)}>{item.count}</span>
             </button>
           ))}
           <div style={{borderTop:'1px solid #f0f0ee',marginTop:'8px',paddingTop:'8px'}}>
-            <button onClick={()=>{setShowArchive(true);setFilter('all')}} style={S.navBtn(showArchive)}>
+            <button onClick={()=>{setShowArchive(true);setFilter('all');setShowSuggestions(false)}} style={S.navBtn(showArchive)}>
               📦 {t.archive}
               <span style={S.badge(false,false)}>{counts.archive}</span>
+            </button>
+            <button onClick={()=>{setShowSuggestions(true);setShowArchive(false)}} style={S.navBtn(showSuggestions)}>
+              💡 {t.suggestions}
             </button>
           </div>
         </nav>
 
         <div style={S.sidebarBottom}>
-          <div style={{fontSize:'13px',fontWeight:'500',color:'#111',marginBottom:'2px',letterSpacing:'-0.1px'}}>{profile?.full_name||user?.email?.split('@')[0]}</div>
+          <div style={{fontSize:'13px',fontWeight:'500',color:'#111',marginBottom:'2px'}}>{profile?.full_name||user?.email?.split('@')[0]}</div>
           <div style={{fontSize:'11px',color:'#9ca3af',marginBottom:'10px'}}>{profile?.role==='admin'?t.admin:t.user}</div>
-          <button onClick={()=>router.push('/messages')} style={{display:'block',fontSize:'11px',color:'#2563eb',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>
-            {lang==='pl'?'Wiadomosci':'Messages'}
-          </button>
+          <button onClick={()=>router.push('/messages')} style={{display:'block',fontSize:'11px',color:'#2563eb',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>Wiadomosci</button>
           <button onClick={()=>router.push('/reports')} style={{display:'block',fontSize:'11px',color:'#16a34a',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>{t.reports}</button>
           <button onClick={()=>router.push('/account')} style={{display:'block',fontSize:'11px',color:'#6b7280',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontFamily:"'DM Sans', sans-serif"}}>{t.account}</button>
           {profile?.role==='admin'&&<button onClick={()=>router.push('/admin')} style={{display:'block',fontSize:'11px',color:'#7c3aed',border:'none',background:'none',cursor:'pointer',padding:'0',marginBottom:'5px',fontWeight:'500',fontFamily:"'DM Sans', sans-serif"}}>{t.adminPanel}</button>}
@@ -872,101 +742,86 @@ export default function Dashboard() {
       {/* MAIN */}
       <div style={{flex:1,display:'flex',overflow:'hidden'}}>
         <div style={{...S.main,flex:1}}>
-          {showTimeoutWarning&&(
-            <div style={{background:'#fffbeb',borderBottom:'1px solid #fde68a',padding:'6px 24px',fontSize:'12px',color:'#92400e',display:'flex',alignItems:'center',gap:'8px'}}>
-              <span>⚠️</span>
-              <span>Sesja wygasnie za 30 minut z powodu braku aktywnosci.</span>
-              <button onClick={()=>{setShowTimeoutWarning(false);supabase.auth.getSession()}} style={{marginLeft:'auto',fontSize:'11px',padding:'3px 10px',background:'#92400e',color:'white',border:'none',borderRadius:'5px',cursor:'pointer',fontFamily:"'DM Sans',sans-serif"}}>
-                Przedluz sesje
-              </button>
-            </div>
-          )}
           <div style={S.liveBanner}>
             <span style={{width:'6px',height:'6px',borderRadius:'50%',background:'#16a34a',display:'inline-block'}}></span>
             {t.live}
           </div>
 
-          <div style={S.topbar}>
-            <span style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.3px',color:'#111'}}>
-              {WORKSPACES.find(w=>w.key===workspace)?.label}
-              {showArchive&&<span style={{fontSize:'13px',color:'#9ca3af',fontWeight:'400',marginLeft:'8px'}}>· {t.archive}</span>}
-            </span>
-            <button onClick={()=>router.push('/crm')} style={{display:'flex',alignItems:'center',gap:'6px',padding:'6px 13px',borderRadius:'8px',border:'1px solid #e9d5ff',background:'#f5f3ff',color:'#6d28d9',fontSize:'13px',fontWeight:'500',cursor:'pointer',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3h10M2 7h6M2 11h8" stroke="#6d28d9" strokeWidth="1.3" strokeLinecap="round"/></svg>
-              CRM
-            </button>
-            <span style={{flex:1}}/>
-            {!showArchive&&<input value={search} onChange={e=>setSearch(e.target.value)} placeholder={t.search} style={S.searchInput} />}
-            {!showArchive&&<button onClick={openNew} style={S.btnPrimary}>{t.newTask}</button>}
-
-            {/* NOTIFICATION BELL */}
-            <NotificationBell
-              notifications={notifications}
-              onMarkRead={markNotifRead}
-              onMarkAllRead={markAllNotifsRead}
-              onClickNotif={handleClickNotif}
-            />
-
-            {/* CHAT BUTTON */}
-            <button onClick={()=>setShowChat(v=>!v)} style={{position:'relative',display:'flex',alignItems:'center',gap:'6px',padding:'7px 13px',background:showChat?'#111':'#fff',color:showChat?'white':'#374151',border:'1px solid #e8e8e6',borderRadius:'8px',cursor:'pointer',fontSize:'13px',fontWeight:'500',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7c0 2.8-2.2 5-5 5l-3 1.5.5-2C3 10.4 2 8.8 2 7c0-2.8 2.2-5 5-5s5 2.2 5 5z" stroke={showChat?'white':'#374151'} strokeWidth="1.3" strokeLinejoin="round"/></svg>
-              Czat
-              {totalUnread > 0 && <span style={{position:'absolute',top:'-5px',right:'-5px',width:'16px',height:'16px',background:'#2563eb',color:'white',borderRadius:'50%',fontSize:'9px',fontWeight:'700',display:'flex',alignItems:'center',justifyContent:'center'}}>{totalUnread > 9 ? '9+' : totalUnread}</span>}
-            </button>
-          </div>
-
-          {!showArchive&&(
-            <div style={S.statsGrid}>
-              {[
-                {label:t.all, val:counts.all, color:'#111', action:()=>{setFilter('all');setShowArchive(false)}},
-                {label:t.mine, val:counts.mine, color:'#2563eb', action:()=>{setFilter('mine');setShowArchive(false)}},
-                {label:t.urgent, val:counts.urgent, color:'#dc2626', action:()=>{setFilter('urgent');setShowArchive(false)}},
-                {label:t.archive, val:counts.archive, color:'#9ca3af', action:()=>{setShowArchive(true);setFilter('all')}},
-              ].map(s=>{
-                const filterKey = s.label===t.all?'all':s.label===t.mine?'mine':s.label===t.urgent?'urgent':'archive'
-                const isActive = filterKey==='archive' ? showArchive : (filter===filterKey && !showArchive)
-                return (
-                  <div key={s.label} onClick={s.action} style={{...S.statCard, cursor:'pointer', border: isActive?'2px solid '+s.color:'1px solid #e8e8e6', transition:'all 0.15s'}}
-                    onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.08)';e.currentTarget.style.transform='translateY(-1px)'}}
-                    onMouseLeave={e=>{e.currentTarget.style.boxShadow='none';e.currentTarget.style.transform='translateY(0)'}}>
-                    <div style={{fontSize:'10px',color:'#9ca3af',marginBottom:'6px',fontWeight:'500',letterSpacing:'0.06em',textTransform:'uppercase'}}>{s.label}</div>
-                    <div style={{fontSize:'28px',fontWeight:'600',color:s.color,letterSpacing:'-0.5px',lineHeight:'1'}}>{s.val}</div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          <div style={{flex:1,overflow:'auto',padding:'14px 24px 24px'}}>
-            <div style={S.tableWrap}>
-              {showArchive&&<div style={{padding:'12px 20px',borderBottom:'1px solid #e8e8e6',background:'#fafaf9',display:'flex',alignItems:'center',gap:'8px'}}><span style={{fontSize:'13px',fontWeight:'500',color:'#6b7280'}}>📦 {t.archive}</span><span style={{fontSize:'12px',color:'#9ca3af'}}>— {t.archiveNote}</span></div>}
-              <div style={{display:'grid',gridTemplateColumns:cols,padding:'10px 16px',borderBottom:'1px solid #e8e8e6',background:'#fafaf9'}}>
-                {[t.col1,t.col2,t.col3,t.col4,t.col5,t.col6,t.col7,showArchive?'':t.col8].map((h,i)=>(
-                  <span key={i} style={S.th}>{h}</span>
-                ))}
+          {/* SUGGESTIONS VIEW */}
+          {showSuggestions ? (
+            <>
+              <div style={S.topbar}>
+                <span style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.3px',color:'#111'}}>💡 Sugestie i usprawnienia</span>
+                <span style={{flex:1}}/>
+                <NotificationBell notifications={notifications} onMarkRead={markNotifRead} onMarkAllRead={markAllNotifsRead} onClickNotif={handleClickNotif}/>
+                <button onClick={()=>setShowChat(v=>!v)} style={{position:'relative',display:'flex',alignItems:'center',gap:'6px',padding:'7px 13px',background:showChat?'#111':'#fff',color:showChat?'white':'#374151',border:'1px solid #e8e8e6',borderRadius:'8px',cursor:'pointer',fontSize:'13px',fontWeight:'500',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
+                  💬 Czat
+                  {totalUnread>0&&<span style={{position:'absolute',top:'-5px',right:'-5px',width:'16px',height:'16px',background:'#2563eb',color:'white',borderRadius:'50%',fontSize:'9px',fontWeight:'700',display:'flex',alignItems:'center',justifyContent:'center'}}>{totalUnread>9?'9+':totalUnread}</span>}
+                </button>
               </div>
-              {showArchive
-                ? archived.length===0?<div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>{t.noArchive}</div>:archived.map((task,i)=><TaskRow key={task.id} task={task} isArchived={true} index={i}/>)
-                : filtered.length===0?<div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>{t.noTasks}</div>:filtered.map((task,i)=><TaskRow key={task.id} task={task} index={i}/>)
-              }
-            </div>
-          </div>
+              <SuggestionsPanel user={user} profile={profile} users={users} />
+            </>
+          ) : (
+            <>
+              <div style={S.topbar}>
+                <span style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.3px',color:'#111'}}>
+                  {WORKSPACES.find(w=>w.key===workspace)?.label}
+                  {showArchive&&<span style={{fontSize:'13px',color:'#9ca3af',fontWeight:'400',marginLeft:'8px'}}>· {t.archive}</span>}
+                </span>
+                <button onClick={()=>router.push('/crm')} style={{display:'flex',alignItems:'center',gap:'6px',padding:'6px 13px',borderRadius:'8px',border:'1px solid #e9d5ff',background:'#f5f3ff',color:'#6d28d9',fontSize:'13px',fontWeight:'500',cursor:'pointer',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3h10M2 7h6M2 11h8" stroke="#6d28d9" strokeWidth="1.3" strokeLinecap="round"/></svg>
+                  CRM
+                </button>
+                <span style={{flex:1}}/>
+                {!showArchive&&<input value={search} onChange={e=>setSearch(e.target.value)} placeholder={t.search} style={S.searchInput}/>}
+                {!showArchive&&<button onClick={openNew} style={S.btnPrimary}>{t.newTask}</button>}
+                <NotificationBell notifications={notifications} onMarkRead={markNotifRead} onMarkAllRead={markAllNotifsRead} onClickNotif={handleClickNotif}/>
+                <button onClick={()=>setShowChat(v=>!v)} style={{position:'relative',display:'flex',alignItems:'center',gap:'6px',padding:'7px 13px',background:showChat?'#111':'#fff',color:showChat?'white':'#374151',border:'1px solid #e8e8e6',borderRadius:'8px',cursor:'pointer',fontSize:'13px',fontWeight:'500',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 7c0 2.8-2.2 5-5 5l-3 1.5.5-2C3 10.4 2 8.8 2 7c0-2.8 2.2-5 5-5s5 2.2 5 5z" stroke={showChat?'white':'#374151'} strokeWidth="1.3" strokeLinejoin="round"/></svg>
+                  Czat
+                  {totalUnread>0&&<span style={{position:'absolute',top:'-5px',right:'-5px',width:'16px',height:'16px',background:'#2563eb',color:'white',borderRadius:'50%',fontSize:'9px',fontWeight:'700',display:'flex',alignItems:'center',justifyContent:'center'}}>{totalUnread>9?'9+':totalUnread}</span>}
+                </button>
+              </div>
+
+              {!showArchive&&(
+                <div style={S.statsGrid}>
+                  {[
+                    {label:t.all,val:counts.all,color:'#111',action:()=>{setFilter('all');setShowArchive(false)}},
+                    {label:t.mine,val:counts.mine,color:'#2563eb',action:()=>{setFilter('mine');setShowArchive(false)}},
+                    {label:t.urgent,val:counts.urgent,color:'#dc2626',action:()=>{setFilter('urgent');setShowArchive(false)}},
+                    {label:t.archive,val:counts.archive,color:'#9ca3af',action:()=>{setShowArchive(true);setFilter('all')}},
+                  ].map(s=>{
+                    const isActive = s.label===t.archive?showArchive:(filter===(s.label===t.all?'all':s.label===t.mine?'mine':'urgent')&&!showArchive)
+                    return (
+                      <div key={s.label} onClick={s.action} style={{...S.statCard,cursor:'pointer',border:isActive?`2px solid ${s.color}`:'1px solid #e8e8e6'}}>
+                        <div style={{fontSize:'10px',color:'#9ca3af',marginBottom:'6px',fontWeight:'500',letterSpacing:'0.06em',textTransform:'uppercase'}}>{s.label}</div>
+                        <div style={{fontSize:'28px',fontWeight:'600',color:s.color,letterSpacing:'-0.5px',lineHeight:'1'}}>{s.val}</div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              <div style={{flex:1,overflow:'auto',padding:'14px 24px 24px'}}>
+                <div style={S.tableWrap}>
+                  {showArchive&&<div style={{padding:'12px 20px',borderBottom:'1px solid #e8e8e6',background:'#fafaf9',display:'flex',alignItems:'center',gap:'8px'}}><span style={{fontSize:'13px',fontWeight:'500',color:'#6b7280'}}>📦 {t.archive}</span><span style={{fontSize:'12px',color:'#9ca3af'}}>— {t.archiveNote}</span></div>}
+                  <div style={{display:'grid',gridTemplateColumns:cols,padding:'10px 16px',borderBottom:'1px solid #e8e8e6',background:'#fafaf9'}}>
+                    {[t.col1,t.col2,t.col3,t.col4,t.col5,t.col6,t.col7,showArchive?'':t.col8].map((h,i)=>(
+                      <span key={i} style={S.th}>{h}</span>
+                    ))}
+                  </div>
+                  {showArchive
+                    ? archived.length===0?<div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>{t.noArchive}</div>:archived.map((task,i)=><TaskRow key={task.id} task={task} isArchived={true} index={i}/>)
+                    : filtered.length===0?<div style={{padding:'40px',textAlign:'center',color:'#9ca3af',fontSize:'13px'}}>{t.noTasks}</div>:filtered.map((task,i)=><TaskRow key={task.id} task={task} index={i}/>)
+                  }
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {showChat&&<ChatPanel
-        user={user} profile={profile} lang={lang}
-        chatUsers={chatUsers} chatSelected={chatSelected} setChatSelected={setChatSelected}
-        chatMessages={chatMessages} chatText={chatText} setChatText={setChatText}
-        chatUnread={chatUnread} chatTaskObj={chatTaskObj} setChatTaskObj={setChatTaskObj}
-        chatTaskRef={chatTaskRef} setChatTaskRef={setChatTaskRef}
-        showChatTaskPicker={showChatTaskPicker} setShowChatTaskPicker={setShowChatTaskPicker}
-        chatTaskSearch={chatTaskSearch} setChatTaskSearch={setChatTaskSearch}
-        chatAllTasks={chatAllTasks} chatSending={chatSending}
-        chatEndRef={chatEndRef} chatFileRef={chatFileRef} chatInputRef={chatInputRef}
-        sendChatMsg={sendChatMsg} sendChatFile={sendChatFile}
-        onClose={()=>setShowChat(false)}
-      />}
+      {showChat&&<ChatPanel user={user} profile={profile} lang={lang} chatUsers={chatUsers} chatSelected={chatSelected} setChatSelected={setChatSelected} chatMessages={chatMessages} chatText={chatText} setChatText={setChatText} chatUnread={chatUnread} chatTaskObj={chatTaskObj} setChatTaskObj={setChatTaskObj} chatTaskRef={chatTaskRef} setChatTaskRef={setChatTaskRef} showChatTaskPicker={showChatTaskPicker} setShowChatTaskPicker={setShowChatTaskPicker} chatTaskSearch={chatTaskSearch} setChatTaskSearch={setChatTaskSearch} chatAllTasks={chatAllTasks} chatSending={chatSending} chatEndRef={chatEndRef} chatFileRef={chatFileRef} chatInputRef={chatInputRef} sendChatMsg={sendChatMsg} sendChatFile={sendChatFile} onClose={()=>setShowChat(false)}/>}
 
       {/* PREVIEW MODAL */}
       {showPreview&&selectedTask&&(
@@ -974,31 +829,23 @@ export default function Dashboard() {
           <div style={S.modal('620px')}>
             <div style={S.modalHeader}>
               <div>
-                <div style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.2px',color:'#111'}}>{selectedTask.product_name}</div>
+                <div style={{fontSize:'15px',fontWeight:'600',color:'#111'}}>{selectedTask.product_name}</div>
                 <div style={{fontSize:'12px',color:'#9ca3af',marginTop:'3px'}}>
                   {selectedTask.order_number}{selectedTask.client_name?' · '+selectedTask.client_name:''}
                   {isOverdue(selectedTask)&&<span style={{marginLeft:'8px',background:'#fef2f2',color:'#dc2626',fontSize:'10px',padding:'2px 7px',borderRadius:'5px',fontWeight:'500'}}>{t.overdue}</span>}
                 </div>
               </div>
-              <button onClick={()=>setShowPreview(false)} style={{border:'none',background:'none',fontSize:'20px',cursor:'pointer',color:'#9ca3af',lineHeight:'1'}}>×</button>
+              <button onClick={()=>setShowPreview(false)} style={{border:'none',background:'none',fontSize:'20px',cursor:'pointer',color:'#9ca3af'}}>×</button>
             </div>
             <div style={S.modalBody}>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px',marginBottom:'16px'}}>
                 {[
                   {label:t.col4, val:<span style={S.pill(selectedTask.status)}>{statusLabel(selectedTask.status)}</span>},
-                  {label:t.col6, val:<span style={{display:'flex',alignItems:'center',gap:'5px'}}><span style={{width:'8px',height:'8px',borderRadius:'50%',background:PRIO_DOT[selectedTask.priority],display:'inline-block'}}></span>{selectedTask.priority==='high'?t.high:selectedTask.priority==='med'?t.med:t.low}</span>},
-                  {label:t.assignedTo, val: (() => {
-                    const assignedUsersList = [...new Set([...(selectedTask.assigned_users||[]), ...(selectedTask.assigned_to?[selectedTask.assigned_to]:[])])]
-                    const assignedProfiles = users.filter(u => assignedUsersList.includes(u.id))
-                    return assignedProfiles.length > 0
-                      ? <div style={{display:'flex',gap:'4px',flexWrap:'wrap'}}>{assignedProfiles.map(u=><span key={u.id} style={{background:'#eff6ff',color:'#1d4ed8',fontSize:'11px',padding:'2px 8px',borderRadius:'20px',fontWeight:'500'}}>{u.full_name}</span>)}</div>
-                      : '—'
-                  })()},
+                  {label:t.col6, val:<span style={{display:'flex',alignItems:'center',gap:'5px'}}><span style={{width:'8px',height:'8px',borderRadius:'50%',background:PRIO_DOT[selectedTask.priority],display:'inline-block'}}></span>{selectedTask.priority==='high'?'Wysoki':selectedTask.priority==='med'?'Sredni':'Niski'}</span>},
+                  {label:t.col5, val:users.filter(u=>[...(selectedTask.assigned_users||[]),...(selectedTask.assigned_to?[selectedTask.assigned_to]:[])].includes(u.id)).map(u=>u.full_name).join(', ')||'—'},
                   {label:t.col7, val:selectedTask.deadline?fmtDate(selectedTask.deadline):'—'},
                   {label:t.col3, val:selectedTask.marketplace||'—'},
                   {label:'SKU', val:selectedTask.sku||'—'},
-                  {label:t.f_client, val:selectedTask.client_name||'—'},
-                  {label:t.f_cat, val:selectedTask.category||'—'},
                 ].map(item=>(
                   <div key={item.label} style={S.metaItem}>
                     <div style={S.metaLabel}>{item.label}</div>
@@ -1006,7 +853,7 @@ export default function Dashboard() {
                   </div>
                 ))}
               </div>
-              {selectedTask.description&&<div style={{padding:'12px 14px',background:'#fafaf9',borderRadius:'8px',border:'1px solid #f0f0ee',fontSize:'13px',color:'#374151',lineHeight:'1.6',marginBottom:'16px'}}><div style={{...S.metaLabel,marginBottom:'6px'}}>{t.descLabel}</div>{selectedTask.description}</div>}
+              {selectedTask.description&&<div style={{padding:'12px 14px',background:'#fafaf9',borderRadius:'8px',border:'1px solid #f0f0ee',fontSize:'13px',color:'#374151',lineHeight:'1.6',marginBottom:'16px'}}>{selectedTask.description}</div>}
               {taskFiles.length>0&&(
                 <div style={{marginBottom:'16px'}}>
                   <div style={{...S.metaLabel,marginBottom:'8px'}}>{t.attach} ({taskFiles.length})</div>
@@ -1032,17 +879,16 @@ export default function Dashboard() {
                     <div style={{fontSize:'13px',color:'#111',lineHeight:'1.5',paddingLeft:'29px'}}>{c.content}</div>
                   </div>
                 ))}
-                {/* Add comment in preview */}
                 <div style={{display:'flex',gap:'8px',marginTop:'10px'}}>
-                  <input value={newComment} onChange={e=>setNewComment(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&sendComment()} placeholder={t.addComment} style={{...S.input, flex:1}} />
-                  <button onClick={sendComment} disabled={sendingCmt||!newComment.trim()} style={{...S.btnPrimary, opacity:(!newComment.trim()||sendingCmt)?0.5:1}}>{t.send}</button>
+                  <input value={newComment} onChange={e=>setNewComment(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendComment()} placeholder={t.addComment} style={{...S.input,flex:1}}/>
+                  <button onClick={sendComment} disabled={sendingCmt||!newComment.trim()} style={{...S.btnPrimary,opacity:(!newComment.trim()||sendingCmt)?0.5:1}}>{t.send}</button>
                 </div>
               </div>
             </div>
             <div style={S.modalFooter}>
-              {!showArchive&&<button onClick={()=>{setShowPreview(false);openDetail(selectedTask)}} style={{...S.btnSm('green'), padding:'8px 14px', fontSize:'13px'}}>📎 {t.files}</button>}
+              {!showArchive&&<button onClick={()=>{setShowPreview(false);openDetail(selectedTask)}} style={{...S.btnSm('green'),padding:'8px 14px',fontSize:'13px'}}>📎 {t.files}</button>}
               {!showArchive&&<button onClick={()=>{setShowPreview(false);openEdit(selectedTask)}} style={S.btnPrimary}>{t.edit}</button>}
-              <button onClick={()=>setShowPreview(false)} style={{...S.btnSm(), padding:'8px 16px', fontSize:'13px'}}>{t.cancel}</button>
+              <button onClick={()=>setShowPreview(false)} style={{...S.btnSm(),padding:'8px 16px',fontSize:'13px'}}>{t.cancel}</button>
             </div>
           </div>
         </div>
@@ -1053,43 +899,42 @@ export default function Dashboard() {
         <div style={S.modalOverlay}>
           <div style={S.modal('340px')}>
             <div style={S.modalHeader}>
-              <span style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.2px'}}>{t.moveTitle}</span>
-              <button onClick={()=>setShowMove(false)} style={{border:'none',background:'none',fontSize:'20px',cursor:'pointer',color:'#9ca3af',lineHeight:'1'}}>×</button>
+              <span style={{fontSize:'15px',fontWeight:'600'}}>{t.moveTitle}</span>
+              <button onClick={()=>setShowMove(false)} style={{border:'none',background:'none',fontSize:'20px',cursor:'pointer',color:'#9ca3af'}}>×</button>
             </div>
             <div style={S.modalBody}>
               <div style={{fontSize:'13px',color:'#374151',marginBottom:'14px',fontWeight:'500'}}>{selectedTask.product_name}</div>
               <FormField label={t.moveTo}>
-                <select value={moveTarget} onChange={e=>setMoveTarget(e.target.value)} style={{...S.select, marginBottom:'20px'}}>
+                <select value={moveTarget} onChange={e=>setMoveTarget(e.target.value)} style={{...S.select,marginBottom:'20px'}}>
                   {availWS.map(w=><option key={w.key} value={w.key}>{w.label}</option>)}
                 </select>
               </FormField>
-              <div style={{display:'flex',justifyContent:'flex-end',gap:'8px',marginTop:'4px'}}>
-                <button onClick={()=>setShowMove(false)} style={{...S.btnSm(), padding:'8px 16px', fontSize:'13px'}}>{t.cancel}</button>
-                <button onClick={doMove} style={{...S.btnPrimary, background:'#4f46e5'}}>{t.move}</button>
+              <div style={{display:'flex',justifyContent:'flex-end',gap:'8px'}}>
+                <button onClick={()=>setShowMove(false)} style={{...S.btnSm(),padding:'8px 16px',fontSize:'13px'}}>{t.cancel}</button>
+                <button onClick={doMove} style={{...S.btnPrimary,background:'#4f46e5'}}>{t.move}</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* FILES + COMMENTS MODAL */}
+      {/* FILES MODAL */}
       {showDetail&&selectedTask&&(
         <div style={S.modalOverlay}>
           <div style={S.modal('560px')}>
             <div style={S.modalHeader}>
               <div>
-                <div style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.2px'}}>{selectedTask.product_name}</div>
+                <div style={{fontSize:'15px',fontWeight:'600'}}>{selectedTask.product_name}</div>
                 <div style={{fontSize:'12px',color:'#9ca3af',marginTop:'2px'}}>{selectedTask.order_number}{selectedTask.client_name?' · '+selectedTask.client_name:''}</div>
               </div>
-              <button onClick={()=>setShowDetail(false)} style={{border:'none',background:'none',fontSize:'20px',cursor:'pointer',color:'#9ca3af',lineHeight:'1'}}>×</button>
+              <button onClick={()=>setShowDetail(false)} style={{border:'none',background:'none',fontSize:'20px',cursor:'pointer',color:'#9ca3af'}}>×</button>
             </div>
             <div style={S.modalBody}>
-              {selectedTask.description&&<div style={{marginBottom:'16px',padding:'12px 14px',background:'#fafaf9',borderRadius:'8px',border:'1px solid #f0f0ee',fontSize:'13px',color:'#374151',lineHeight:'1.5'}}>{selectedTask.description}</div>}
               <div style={{marginBottom:'18px'}}>
                 <div style={{marginBottom:'10px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
                   <div style={{...S.metaLabel,marginBottom:'0'}}>{t.attach} ({taskFiles.length})</div>
-                  <button onClick={()=>fileRef.current?.click()} disabled={uploading} style={{...S.btnSm('green'), padding:'5px 10px', fontSize:'12px'}}>{uploading?t.uploading:t.addFile}</button>
-                  <input ref={fileRef} type="file" style={{display:'none'}} onChange={uploadFile} accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp" />
+                  <button onClick={()=>fileRef.current?.click()} disabled={uploading} style={{...S.btnSm('green'),padding:'5px 10px',fontSize:'12px'}}>{uploading?t.uploading:t.addFile}</button>
+                  <input ref={fileRef} type="file" style={{display:'none'}} onChange={uploadFile} accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.gif,.webp"/>
                 </div>
                 {taskFiles.length===0&&<div style={{padding:'16px',textAlign:'center',color:'#9ca3af',fontSize:'13px',border:'1px dashed #e8e8e6',borderRadius:'8px',background:'#fafaf9'}}>{t.noFiles}</div>}
                 {taskFiles.map(file=>(
@@ -1115,8 +960,8 @@ export default function Dashboard() {
                   </div>
                 ))}
                 <div style={{display:'flex',gap:'8px',marginTop:'10px'}}>
-                  <input value={newComment} onChange={e=>setNewComment(e.target.value)} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&sendComment()} placeholder={t.addComment} style={{...S.input, flex:1}} />
-                  <button onClick={sendComment} disabled={sendingCmt||!newComment.trim()} style={{...S.btnPrimary, opacity:(!newComment.trim()||sendingCmt)?0.5:1}}>{t.send}</button>
+                  <input value={newComment} onChange={e=>setNewComment(e.target.value)} onKeyDown={e=>e.key==='Enter'&&sendComment()} placeholder={t.addComment} style={{...S.input,flex:1}}/>
+                  <button onClick={sendComment} disabled={sendingCmt||!newComment.trim()} style={{...S.btnPrimary,opacity:(!newComment.trim()||sendingCmt)?0.5:1}}>{t.send}</button>
                 </div>
               </div>
             </div>
@@ -1129,20 +974,20 @@ export default function Dashboard() {
         <div style={S.modalOverlay}>
           <div style={S.modal()}>
             <div style={S.modalHeader}>
-              <span style={{fontSize:'15px',fontWeight:'600',letterSpacing:'-0.2px'}}>{editingTask?t.editTask:t.newTaskTitle}</span>
-              <button onClick={()=>setShowModal(false)} style={{border:'none',background:'none',fontSize:'20px',cursor:'pointer',color:'#9ca3af',lineHeight:'1'}}>×</button>
+              <span style={{fontSize:'15px',fontWeight:'600'}}>{editingTask?t.editTask:t.newTaskTitle}</span>
+              <button onClick={()=>setShowModal(false)} style={{border:'none',background:'none',fontSize:'20px',cursor:'pointer',color:'#9ca3af'}}>×</button>
             </div>
             <div style={S.modalBody}>
               <div style={S.grid2}>
-                <FormField label={t.f_order}><input value={form.order_number} onChange={e=>setForm({...form,order_number:e.target.value})} placeholder="ORD-2026-001" style={S.input} /></FormField>
-                <FormField label={t.f_claim}><input value={form.claim_number} onChange={e=>setForm({...form,claim_number:e.target.value})} placeholder="CLM-001" style={S.input} /></FormField>
+                <FormField label={t.f_order}><input value={form.order_number} onChange={e=>setForm({...form,order_number:e.target.value})} placeholder="ORD-2026-001" style={S.input}/></FormField>
+                <FormField label={t.f_claim}><input value={form.claim_number} onChange={e=>setForm({...form,claim_number:e.target.value})} placeholder="CLM-001" style={S.input}/></FormField>
               </div>
               <div style={{marginBottom:'12px'}}>
-                <FormField label={t.f_product}><input value={form.product_name} onChange={e=>setForm({...form,product_name:e.target.value})} placeholder="np. Strawberry Slices 100g" style={S.input} /></FormField>
+                <FormField label={t.f_product}><input value={form.product_name} onChange={e=>setForm({...form,product_name:e.target.value})} placeholder="np. Strawberry Slices 100g" style={S.input}/></FormField>
               </div>
               <div style={S.grid2}>
-                <FormField label={t.f_sku}><input value={form.sku} onChange={e=>setForm({...form,sku:e.target.value})} placeholder="HF-STR-100" style={S.input} /></FormField>
-                <FormField label={t.f_client}><input value={form.client_name} onChange={e=>setForm({...form,client_name:e.target.value})} placeholder="Nazwa klienta" style={S.input} /></FormField>
+                <FormField label={t.f_sku}><input value={form.sku} onChange={e=>setForm({...form,sku:e.target.value})} placeholder="HF-STR-100" style={S.input}/></FormField>
+                <FormField label={t.f_client}><input value={form.client_name} onChange={e=>setForm({...form,client_name:e.target.value})} placeholder="Nazwa klienta" style={S.input}/></FormField>
               </div>
               <div style={S.grid2}>
                 <FormField label={t.f_marketplace}>
@@ -1159,48 +1004,46 @@ export default function Dashboard() {
               <div style={S.grid2}>
                 <FormField label={t.f_prio}>
                   <select value={form.priority} onChange={e=>setForm({...form,priority:e.target.value})} style={S.select}>
-                    <option value="high">{t.high}</option>
-                    <option value="med">{t.med}</option>
-                    <option value="low">{t.low}</option>
+                    <option value="high">Wysoki</option>
+                    <option value="med">Sredni</option>
+                    <option value="low">Niski</option>
                   </select>
                 </FormField>
                 <FormField label={t.f_status}>
                   <select value={form.status} onChange={e=>setForm({...form,status:e.target.value})} style={S.select}>
-                    {Object.entries(STATUS_META).map(([k,v])=><option key={k} value={k}>{lang==='en'?v.labelEn:v.label}</option>)}
+                    {Object.entries(STATUS_META).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}
                   </select>
                 </FormField>
               </div>
-              {/* MULTI-SELECT ASSIGNEES */}
               <div style={{marginBottom:'12px'}}>
-                <FormField label={`${t.f_assign} (mozna wybrac wiele osob)`}>
+                <FormField label={`${t.f_assign} (mozna wybrac wiele)`}>
                   <UserMultiSelect
                     users={users}
-                    selected={[...new Set([...(form.assigned_users||[]), ...(form.assigned_to?[form.assigned_to]:[])])]}
-                    onChange={(ids) => setForm({...form, assigned_users: ids, assigned_to: ids[0] || ''})}
-                    placeholder="— Wybierz osoby —"
+                    selected={[...new Set([...(form.assigned_users||[]),...(form.assigned_to?[form.assigned_to]:[])])]}
+                    onChange={(ids)=>setForm({...form,assigned_users:ids,assigned_to:ids[0]||''})}
                   />
                 </FormField>
               </div>
               <div style={{marginBottom:'12px'}}>
-                <FormField label={t.f_deadline}><input type="date" value={form.deadline} onChange={e=>setForm({...form,deadline:e.target.value})} style={S.input} /></FormField>
+                <FormField label={t.f_deadline}><input type="date" value={form.deadline} onChange={e=>setForm({...form,deadline:e.target.value})} style={S.input}/></FormField>
               </div>
               {crmClients.length>0&&(
                 <div style={{marginBottom:'12px'}}>
                   <FormField label="Klient CRM (opcjonalnie)">
                     <select value={form.client_id} onChange={e=>setForm({...form,client_id:e.target.value})} style={S.select}>
-                      <option value="">— Brak powiazania z CRM —</option>
+                      <option value="">— Brak powiazania —</option>
                       {crmClients.map(c=><option key={c.id} value={c.id}>{c.company_name||c.contact_name}</option>)}
                     </select>
                   </FormField>
                 </div>
               )}
               <FormField label={t.f_desc}>
-                <textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder={t.f_desc} style={{...S.input, height:'72px', resize:'vertical'}} />
+                <textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})} placeholder={t.f_desc} style={{...S.input,height:'72px',resize:'vertical'}}/>
               </FormField>
             </div>
             <div style={S.modalFooter}>
-              <button onClick={()=>setShowModal(false)} style={{...S.btnSm(), padding:'9px 16px', fontSize:'13px'}}>{t.cancel}</button>
-              <button onClick={handleSave} disabled={saving} style={{...S.btnPrimary, opacity:saving?0.7:1}}>
+              <button onClick={()=>setShowModal(false)} style={{...S.btnSm(),padding:'9px 16px',fontSize:'13px'}}>{t.cancel}</button>
+              <button onClick={handleSave} disabled={saving} style={{...S.btnPrimary,opacity:saving?0.7:1}}>
                 {saving?t.saving:editingTask?t.saveChanges:t.save}
               </button>
             </div>
