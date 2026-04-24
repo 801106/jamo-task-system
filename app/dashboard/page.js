@@ -37,7 +37,7 @@ const T = {
     live:'Polaczono — sync na zywo',
     admin:'Admin', user:'Uzytkownik', account:'Moje konto', logout:'Wyloguj',
     reports:'Raporty', adminPanel:'Panel admina',
-    col1:'Nr zam.', col2:'Zadanie', col3:'Marketplace', col4:'Status', col5:'Przypisano', col6:'Prio', col7:'Termin', col8:'Akcje',
+    col1:'Nr zadania', col2:'Zadanie', col3:'Marketplace', col4:'Status', col5:'Przypisano', col6:'Prio', col7:'Termin', col8:'Akcje',
     noTasks:'Brak zadan', noArchive:'Brak zarchiwizowanych zadan',
     files:'Pliki', edit:'Edytuj', del:'Usun', move:'Przenies',
     editTask:'Edytuj zadanie', newTaskTitle:'Nowe zadanie',
@@ -735,6 +735,10 @@ export default function Dashboard() {
   })
 
   const counts = { all:active.length, open:active.filter(t2=>['open','inprogress','waiting'].includes(t2.status)).length, urgent:active.filter(t2=>t2.status==='urgent').length, mine:active.filter(t2=>t2.assigned_to===user?.id||(t2.assigned_users||[]).includes(user?.id)).length, archive:archived.length }
+  const [suggestionsCount, setSuggestionsCount] = useState(0)
+  useEffect(() => {
+    supabase.from('suggestions').select('id', { count:'exact', head:true }).then(({ count }) => setSuggestionsCount(count || 0))
+  }, [showSuggestions])
   const availWS = WORKSPACES.filter(w=>w.key!==workspace&&(profile?.role==='admin'||(profile?.areas||[]).includes(w.key)))
   const cols = '100px 1fr 100px 120px 120px 70px 80px 140px'
   const fmtDate = (d) => d?new Date(d).toLocaleDateString('pl-PL'):''
@@ -844,6 +848,7 @@ export default function Dashboard() {
             </button>
             <button onClick={()=>{setShowSuggestions(true);setShowArchive(false)}} style={S.navBtn(showSuggestions)}>
               💡 {t.suggestions}
+              {suggestionsCount > 0 && <span style={S.badge(false, false)}>{suggestionsCount}</span>}
             </button>
           </div>
         </nav>
