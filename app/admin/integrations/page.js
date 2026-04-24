@@ -1,12 +1,12 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { supabase } from '../../../lib/supabase'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 const ADMIN_ID = 'd53f6727-6bc7-4602-9ce0-4fc31ab3aba1'
 const F = { fontFamily:"'DM Sans',-apple-system,sans-serif" }
 
-export default function AdminIntegrations() {
+function AdminIntegrationsInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [user, setUser] = useState(null)
@@ -220,5 +220,13 @@ export default function AdminIntegrations() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function AdminIntegrations() {
+  return (
+    <Suspense fallback={<div style={{ padding:'40px', textAlign:'center', fontFamily:"'DM Sans',sans-serif", color:'#9ca3af' }}>Ladowanie...</div>}>
+      <AdminIntegrationsInner />
+    </Suspense>
   )
 }
