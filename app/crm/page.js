@@ -346,7 +346,7 @@ export default function CRM() {
     if (toFlag.length > 0) loadClients()
   }
   function handleAIFilter(ids, label) {
-    setAiFilterIds(ids); setAiFilterLabel(label)
+    setAiFilterIds(ids); setAiFilterLabel(label); setPage(0)
     if (ids) { setSegFilter('all'); setStatusFilter('all'); setSearch('') }
   }
   const daysSince = (d) => d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : null
@@ -364,7 +364,9 @@ export default function CRM() {
       default: return c.created_at || ''
     }
   }
-  const filtered = clients
+  const PAGE_SIZE = 200
+  const [page, setPage] = useState(0)
+  const filteredAll = clients
     .filter(c => {
       if (aiFilterIds) return aiFilterIds.includes(c.id)
       if (segFilter !== 'all' && c.segment !== segFilter) return false
@@ -381,6 +383,8 @@ export default function CRM() {
       if (av > bv) return sortDir === 'asc' ? 1 : -1
       return 0
     })
+  const filtered = filteredAll.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const totalPages = Math.ceil(filteredAll.length / PAGE_SIZE)
   const counts = { all:clients.length, b2b:clients.filter(c=>c.segment==='b2b').length, b2c:clients.filter(c=>c.segment==='b2c').length, giftbox:clients.filter(c=>c.segment==='giftbox').length, vip:clients.filter(c=>c.is_vip).length }
   const fmtDate = (d) => d ? new Date(d).toLocaleDateString('pl-PL') : '—'
   const fmtDT = (d) => d ? new Date(d).toLocaleString('pl-PL', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : ''
@@ -440,8 +444,10 @@ export default function CRM() {
         </div>
         <div style={S.content}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:'10px', marginBottom:'16px' }}>
-            {[{label:'Wszyscy',val:counts.all,color:'#111'},{label:'Jamo B2B',val:counts.b2b,color:'#1d4ed8'},{label:'Healthy Future',val:counts.b2c,color:'#065f46'},{label:'GiftBox',val:counts.giftbox,color:'#6d28d9'},{label:'VIP',val:counts.vip,color:'#92400e'}].map(s => (
-              <div key={s.label} style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', padding:'12px 16px' }}>
+            {[{label:'Wszyscy',val:counts.all,color:'#111',action:()=>{setSegFilter('all');setAiFilterIds(null)}},{label:'Jamo B2B',val:counts.b2b,color:'#1d4ed8',action:()=>{setSegFilter('b2b');setStatusFilter('all');setAiFilterIds(null)}},{label:'Healthy Future',val:counts.b2c,color:'#065f46',action:()=>{setSegFilter('b2c');setStatusFilter('all');setAiFilterIds(null)}},{label:'GiftBox',val:counts.giftbox,color:'#6d28d9',action:()=>{setSegFilter('giftbox');setStatusFilter('all');setAiFilterIds(null)}},{label:'VIP',val:counts.vip,color:'#92400e',action:()=>handleAIFilter(clients.filter(c=>c.is_vip).map(c=>c.id),'VIP')}].map(s => (
+              <div key={s.label} onClick={s.action} style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', padding:'12px 16px', cursor:'pointer' }}
+                onMouseEnter={e=>{e.currentTarget.style.borderColor=s.color;e.currentTarget.style.background='#fafaf9'}}
+                onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e6';e.currentTarget.style.background='#fff'}}>
                 <div style={{ fontSize:'10px', color:'#9ca3af', fontWeight:'500', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'4px' }}>{s.label}</div>
                 <div style={{ fontSize:'24px', fontWeight:'600', color:s.color, letterSpacing:'-0.5px' }}>{s.val}</div>
               </div>
@@ -560,9 +566,22 @@ export default function CRM() {
               )
             })}
           </div>
-          <div style={{ padding:'8px 16px', fontSize:'12px', color:'#9ca3af' }}>
-            Pokazuję {filtered.length} z {clients.length} klientów
-            {sortKey !== 'created_at' && <span> · Sortowanie: {headers.find(h=>h.key===sortKey)?.label} {sortDir==='asc'?'↑':'↓'}</span>}
+          <div style={{ padding:'8px 16px', fontSize:'12px', color:'#9ca3af', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <span>Pokazuję {page*PAGE_SIZE+1}-{Math.min((page+1)*PAGE_SIZE, filteredAll.length)} z {filteredAll.length} klientów ({clients.length} łącznie)
+              {sortKey !== 'created_at' && <span> · Sortowanie: {headers.find(h=>h.key===sortKey)?.label} {sortDir==='asc'?'↑':'↓'}</span>}
+            </span>
+            {totalPages > 1 && (
+              <div style={{ display:'flex', gap:'4px', alignItems:'center' }}>
+                <button onClick={()=>setPage(0)} disabled={page===0} style={{ padding:'3px 8px', border:'1px solid #e8e8e6', borderRadius:'5px', background:'#fff', cursor:page===0?'default':'pointer', color:page===0?'#d1d5db':'#374151', fontSize:'11px', ...F }}>«</button>
+                <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0} style={{ padding:'3px 8px', border:'1px solid #e8e8e6', borderRadius:'5px', background:'#fff', cursor:page===0?'default':'pointer', color:page===0?'#d1d5db':'#374151', fontSize:'11px', ...F }}>‹</button>
+                {Array.from({length:Math.min(5,totalPages)}, (_,i)=>{
+                  const p = Math.max(0, Math.min(totalPages-5, page-2)) + i
+                  return <button key={p} onClick={()=>setPage(p)} style={{ padding:'3px 8px', border:'1px solid', borderColor:p===page?'#111':'#e8e8e6', borderRadius:'5px', background:p===page?'#111':'#fff', color:p===page?'white':'#374151', fontSize:'11px', cursor:'pointer', ...F }}>{p+1}</button>
+                })}
+                <button onClick={()=>setPage(p=>Math.min(totalPages-1,p+1))} disabled={page===totalPages-1} style={{ padding:'3px 8px', border:'1px solid #e8e8e6', borderRadius:'5px', background:'#fff', cursor:page===totalPages-1?'default':'pointer', color:page===totalPages-1?'#d1d5db':'#374151', fontSize:'11px', ...F }}>›</button>
+                <button onClick={()=>setPage(totalPages-1)} disabled={page===totalPages-1} style={{ padding:'3px 8px', border:'1px solid #e8e8e6', borderRadius:'5px', background:'#fff', cursor:page===totalPages-1?'default':'pointer', color:page===totalPages-1?'#d1d5db':'#374151', fontSize:'11px', ...F }}>»</button>
+              </div>
+            )}
           </div>
         </div>
       </div>
