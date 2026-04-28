@@ -8,14 +8,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [timeoutMsg, setTimeoutMsg] = useState(false)
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search)
-      if (params.get('timeout') === '1') setTimeoutMsg(true)
-    }
-  }, [])
   const router = useRouter()
 
   useEffect(() => {
@@ -26,10 +19,29 @@ export default function LoginPage() {
 
   async function handleLogin(e) {
     e.preventDefault()
-    setLoading(true); setError('')
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setError('Nieprawidlowy email lub haslo')
-    else router.push('/dashboard')
+    setLoading(true)
+    setError('')
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (error) {
+      setError('Nieprawidlowy email lub haslo')
+      setLoading(false)
+      return
+    }
+
+    // Sprawdź czy użytkownik ma 2FA
+    const { data: mfaData } = await supabase.auth.mfa.listFactors()
+    const hasTotp = mfaData?.totp?.length > 0
+
+    if (hasTotp) {
+      // Ma 2FA — idź do weryfikacji
+      router.push('/verify')
+    } else {
+      // Nie ma 2FA — idź do konfiguracji
+      router.push('/mfa')
+    }
+
     setLoading(false)
   }
 
@@ -67,7 +79,6 @@ export default function LoginPage() {
           ))}
         </div>
       </div>
-
       {/* RIGHT PANEL */}
       <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:'40px' }}>
         <div style={{ width:'100%', maxWidth:'360px' }}>
@@ -75,34 +86,30 @@ export default function LoginPage() {
             <h2 style={{ fontSize:'22px', fontWeight:'600', color:'#111', margin:'0 0 6px', letterSpacing:'-0.3px' }}>Zaloguj sie</h2>
             <p style={{ fontSize:'13px', color:'#9ca3af', margin:0 }}>Wpisz dane do swojego konta</p>
           </div>
-
           <form onSubmit={handleLogin}>
             <div style={{ marginBottom:'14px' }}>
-              <label style={{ display:'block', fontSize:'12px', fontWeight:'500', marginBottom:'6px', color:'#374151', letterSpacing:'0.01em' }}>Email</label>
+              <label style={{ display:'block', fontSize:'12px', fontWeight:'500', marginBottom:'6px', color:'#374151' }}>Email</label>
               <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="twoj@email.com"
-                style={{ width:'100%', padding:'11px 13px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', outline:'none', background:'white', color:'#111', transition:'border-color 0.15s', ...F }}
+                style={{ width:'100%', padding:'11px 13px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', outline:'none', background:'white', color:'#111', ...F }}
                 onFocus={e=>e.target.style.borderColor='#111'} onBlur={e=>e.target.style.borderColor='#e8e8e6'} />
             </div>
             <div style={{ marginBottom:'22px' }}>
-              <label style={{ display:'block', fontSize:'12px', fontWeight:'500', marginBottom:'6px', color:'#374151', letterSpacing:'0.01em' }}>Haslo</label>
+              <label style={{ display:'block', fontSize:'12px', fontWeight:'500', marginBottom:'6px', color:'#374151' }}>Haslo</label>
               <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required placeholder="••••••••"
-                style={{ width:'100%', padding:'11px 13px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', outline:'none', background:'white', color:'#111', transition:'border-color 0.15s', ...F }}
+                style={{ width:'100%', padding:'11px 13px', border:'1px solid #e8e8e6', borderRadius:'8px', fontSize:'13px', outline:'none', background:'white', color:'#111', ...F }}
                 onFocus={e=>e.target.style.borderColor='#111'} onBlur={e=>e.target.style.borderColor='#e8e8e6'} />
             </div>
-
             {error && (
               <div style={{ padding:'10px 13px', background:'#fef2f2', border:'1px solid #fecaca', borderRadius:'8px', fontSize:'13px', color:'#dc2626', marginBottom:'16px' }}>
                 {error}
               </div>
             )}
-
             <button type="submit" disabled={loading}
-              style={{ width:'100%', padding:'12px', background:loading?'#6b7280':'#111', color:'white', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:loading?'not-allowed':'pointer', letterSpacing:'-0.1px', transition:'background 0.15s', ...F }}>
+              style={{ width:'100%', padding:'12px', background:loading?'#6b7280':'#111', color:'white', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'500', cursor:loading?'not-allowed':'pointer', ...F }}>
               {loading ? 'Logowanie...' : 'Zaloguj sie →'}
             </button>
           </form>
-
-          <p style={{ textAlign:'center', marginTop:'28px', fontSize:'11px', color:'#d1d5db' }}>TaskFlow v14 · Jamo Solutions · 2026</p>
+          <p style={{ textAlign:'center', marginTop:'28px', fontSize:'11px', color:'#d1d5db' }}>TaskFlow · Jamo Solutions · 2026</p>
         </div>
       </div>
     </div>
