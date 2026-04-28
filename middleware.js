@@ -1,26 +1,25 @@
-import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs'
 import { NextResponse } from 'next/server'
 
 export async function middleware(req) {
-  const res = NextResponse.next()
-  const supabase = createMiddlewareClient({ req, res })
-  const { data: { session } } = await supabase.auth.getSession()
-
   const { pathname } = req.nextUrl
 
-  // Publiczne strony - dostępne bez logowania
-  const publicPaths = ['/', '/privacy', '/eula']
-  if (publicPaths.includes(pathname)) return res
+  // Publiczne - bez logowania
+  if (pathname === '/' || 
+      pathname === '/privacy' || 
+      pathname === '/eula' ||
+      pathname.startsWith('/api/') ||
+      pathname.startsWith('/_next/')) {
+    return NextResponse.next()
+  }
 
-  // API routes - nie dotykamy
-  if (pathname.startsWith('/api/')) return res
-
-  // Reszta wymaga logowania
-  if (!session) {
+  // Sprawdź token Supabase w cookies
+  const token = req.cookies.get('sb-rewjvzuuhbqeacexpmwv-auth-token')
+  
+  if (!token) {
     return NextResponse.redirect(new URL('/', req.url))
   }
 
-  return res
+  return NextResponse.next()
 }
 
 export const config = {
