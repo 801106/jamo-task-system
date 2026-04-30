@@ -7,7 +7,7 @@ const F = { fontFamily:"'DM Sans',-apple-system,sans-serif" }
 const SEGMENTS = {
   b2b:     { label:'B2B', labelFull:'Jamo B2B', color:'#1d4ed8', bg:'#eff6ff' },
   b2c:     { label:'B2C', labelFull:'Healthy Future B2C', color:'#065f46', bg:'#ecfdf5' },
-  giftbox: { label:'GiftBox', labelFull:'GiftBox / Short Run', color:'#6d28d9', bg:'#f5f3ff' },
+  giftbox: { label:'Zadruk', labelFull:'Zadruk / Short Run', color:'#6d28d9', bg:'#f5f3ff' },
 }
 const STATUSES = {
   b2b: [
@@ -544,7 +544,7 @@ export default function CRM() {
               {label:'Wszyscy',val:counts.all,color:'#111',action:()=>{setSegFilter('all');setAiFilterIds(null);setPage(0)}},
               {label:'Jamo B2B',val:counts.b2b,color:'#1d4ed8',action:()=>{setSegFilter('b2b');setStatusFilter('all');setAiFilterIds(null);setPage(0)}},
               {label:'Healthy Future',val:counts.b2c,color:'#065f46',action:()=>{setSegFilter('b2c');setStatusFilter('all');setAiFilterIds(null);setPage(0)}},
-              {label:'GiftBox',val:counts.giftbox,color:'#6d28d9',action:()=>{setSegFilter('giftbox');setStatusFilter('all');setAiFilterIds(null);setPage(0)}},
+              {label:'Zadruk',val:counts.giftbox,color:'#6d28d9',action:()=>{setSegFilter('giftbox');setStatusFilter('all');setAiFilterIds(null);setPage(0)}},
               {label:'VIP',val:counts.vip,color:'#92400e',action:()=>handleAIFilter(clients.filter(c=>c.is_vip).map(c=>c.id),'VIP')},
             ].map(s => (
               <div key={s.label} onClick={s.action} style={{ background:'#fff', border:'1px solid #e8e8e6', borderRadius:'10px', padding:'12px 16px', cursor:'pointer' }}
