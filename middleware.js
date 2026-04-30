@@ -12,6 +12,7 @@ pathname === '/eula' ||
     pathname === '/crm-pp' ||
 pathname === '/mfa' ||
 pathname === '/verify' ||
+    pathname === '/admin/encrypt-migration' ||
     pathname.startsWith('/api/') ||
     pathname.startsWith('/_next/')
   ) {
