@@ -8,11 +8,12 @@ export async function middleware(req) {
   if (
     pathname === '/' ||
     pathname === '/privacy' ||
-pathname === '/eula' ||
+    pathname === '/eula' ||
     pathname === '/crm-pp' ||
-pathname === '/mfa' ||
-pathname === '/verify' ||
+    pathname === '/mfa' ||
+    pathname === '/verify' ||
     pathname === '/admin/encrypt-migration' ||
+    pathname === '/admin/backup' ||
     pathname.startsWith('/api/') ||
     pathname.startsWith('/_next/')
   ) {
