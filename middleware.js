@@ -9,6 +9,7 @@ export async function middleware(req) {
     pathname === '/' ||
     pathname === '/privacy' ||
 pathname === '/eula' ||
+    pathname === '/crm-pp' ||
 pathname === '/mfa' ||
 pathname === '/verify' ||
     pathname.startsWith('/api/') ||
