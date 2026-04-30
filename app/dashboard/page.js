@@ -893,9 +893,9 @@ export default function Dashboard() {
                   {WORKSPACES.find(w=>w.key===workspace)?.label}
                   {showArchive&&<span style={{fontSize:'13px',color:'#9ca3af',fontWeight:'400',marginLeft:'8px'}}>· {t.archive}</span>}
                 </span>
-                <button onClick={()=>router.push('/crm')} style={{display:'flex',alignItems:'center',gap:'6px',padding:'6px 13px',borderRadius:'8px',border:'1px solid #e9d5ff',background:'#f5f3ff',color:'#6d28d9',fontSize:'13px',fontWeight:'500',cursor:'pointer',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
+                <button onClick={()=>router.push(workspace==='packpack'?'/crm-pp':'/crm')} style={{display:'flex',alignItems:'center',gap:'6px',padding:'6px 13px',borderRadius:'8px',border:'1px solid #e9d5ff',background:'#f5f3ff',color:'#6d28d9',fontSize:'13px',fontWeight:'500',cursor:'pointer',fontFamily:"'DM Sans',sans-serif",flexShrink:0}}>
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 3h10M2 7h6M2 11h8" stroke="#6d28d9" strokeWidth="1.3" strokeLinecap="round"/></svg>
-                  CRM
+                  {workspace==='packpack'?'CRM PP':'CRM'}
                 </button>
                 <span style={{flex:1}}/>
                 {!showArchive&&<input value={search} onChange={e=>setSearch(e.target.value)} placeholder={t.search} style={S.searchInput}/>}
